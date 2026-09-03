@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.db
+backend/generated_reports/
+
+# Node
+node_modules/
+dist/
+.env
+!.env.example
+
+# Flutter
+mobile/.dart_tool/
+mobile/build/
+mobile/android/
+mobile/ios/
+mobile/.flutter-plugins*
+mobile/.packages
+
+# OS
+.DS_Store
