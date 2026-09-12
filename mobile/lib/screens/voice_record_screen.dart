@@ -558,9 +558,9 @@ class _VoiceRecordScreenState extends State<VoiceRecordScreen> {
                 Container(
                   padding: const EdgeInsets.all(T.s3),
                   decoration: BoxDecoration(
-                    color: T.riskHigh.withOpacity(0.07),
+                    color: T.riskHigh.withValues(alpha: 0.07),
                     borderRadius: BorderRadius.circular(T.radius),
-                    border: Border.all(color: T.riskHigh.withOpacity(0.35)),
+                    border: Border.all(color: T.riskHigh.withValues(alpha: 0.35)),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -642,9 +642,9 @@ class _ResultPanel extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: T.s3, vertical: T.s2),
             decoration: BoxDecoration(
-              color: colour.withOpacity(0.08),
+              color: colour.withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(T.radius),
-              border: Border.all(color: colour.withOpacity(0.35)),
+              border: Border.all(color: colour.withValues(alpha: 0.35)),
             ),
             child: Text(
               '${tr(context, 'risk')}: $riskLevel',

@@ -1,4 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Without this, a release APK has no network access at all. Flutter's
+         generated debug/ and profile/ manifests each declare INTERNET for
+         their own tooling, so a debug run and a profile build both work,
+         while a release build silently produces an app where every API
+         call fails to connect. Declared here so all three agree. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
     <application

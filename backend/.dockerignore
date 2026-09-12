@@ -1,0 +1,25 @@
+# Secrets. .env holds live Meta/Bhashini/LLM tokens and an AES key; a COPY
+# that pulls it in bakes them into an image layer, where they survive being
+# "deleted" in a later layer and are readable by anyone who can pull it.
+# Configuration reaches the container through the host's environment
+# variables instead -- see render.yaml.
+.env
+.env.*
+!.env.example
+
+# 360MB of macOS-linked virtualenv. The image installs its own from
+# requirements.txt; copying this in would both bloat the build context and
+# shadow it with binaries compiled for the wrong platform.
+.venv/
+venv/
+
+# The local demo database. Deployments use Postgres (DATABASE_URL).
+*.db
+
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+
+.DS_Store
+_to_delete/

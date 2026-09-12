@@ -184,8 +184,8 @@ ThemeData _buildTheme() {
     ),
     progressIndicatorTheme: const ProgressIndicatorThemeData(color: T.forest, linearMinHeight: 3),
     // Quiet ripple: confirm the tap landed, don't perform.
-    splashColor: T.forest.withOpacity(0.07),
-    highlightColor: T.forest.withOpacity(0.03),
+    splashColor: T.forest.withValues(alpha: 0.07),
+    highlightColor: T.forest.withValues(alpha: 0.03),
     // Android only, deliberately. CupertinoPageTransitionsBuilder lives in
     // package:flutter/cupertino.dart, and this app imports nothing from
     // Cupertino -- naming it here would mean pulling in a whole widget

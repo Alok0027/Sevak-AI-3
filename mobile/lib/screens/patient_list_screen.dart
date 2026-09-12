@@ -109,7 +109,7 @@ class _PatientListScreenState extends State<PatientListScreen> {
               style: T.body,
               decoration: InputDecoration(
                 hintText: tr(context, 'searchPatients'),
-                hintStyle: T.body.copyWith(color: T.slate.withOpacity(0.8)),
+                hintStyle: T.body.copyWith(color: T.slate.withValues(alpha: 0.8)),
                 prefixIcon: const Icon(Icons.search, color: T.slate),
                 isDense: true,
               ),

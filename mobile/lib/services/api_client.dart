@@ -6,23 +6,32 @@ import '../models/patient.dart';
 
 /// Talks to the FastAPI backend (../backend).
 ///
-/// A physical device reaches the backend over the LAN, so "localhost" is
-/// no use -- it needs the dev machine's IP. That IP is handed out by DHCP
-/// and changes on its own, which meant editing this file every time the
-/// router reassigned it. So the default below is only a default: override
-/// it at launch without touching the source, and without rebuilding a
-/// different binary for each teammate's network:
+/// The default is the deployed backend, so an APK handed to someone --
+/// a reviewer, a teammate, a judge -- works on their phone over mobile
+/// data with no arguments and no build flags. It used to default to a
+/// laptop's LAN address, which meant every installed APK pointed at a
+/// machine that was not on the network and failed at login with a
+/// connection error.
+///
+/// Local development overrides it at launch, so nobody has to edit this
+/// file when DHCP reassigns their IP:
 ///
 ///     flutter run --dart-define=SEVAKAI_API=http://192.168.1.42:8000
 ///
-/// An Android emulator on the same host uses http://10.0.2.2:8000.
+///   - physical device on the same wifi: the dev machine's LAN IP, above
+///   - Android emulator: http://10.0.2.2:8000 (the host, seen from inside)
+///   - iOS simulator: http://localhost:8000
+///
+/// Plain http works in debug builds only -- android/app/src/debug/
+/// AndroidManifest.xml permits cleartext there and nowhere else, so a
+/// release build must point at an https URL.
 class ApiClient {
   final String baseUrl;
   String? _token;
 
   static const _defaultBaseUrl = String.fromEnvironment(
     'SEVAKAI_API',
-    defaultValue: 'http://192.168.4.106:8000',
+    defaultValue: 'https://sevakai-api.onrender.com',
   );
 
   ApiClient({String? baseUrl}) : baseUrl = baseUrl ?? _defaultBaseUrl;

@@ -12,7 +12,23 @@ langchain-core>=0.2
 reportlab>=4.2
 httpx>=0.27
 pytest>=8.2
-faster-whisper>=1.0   # local, self-hosted ASR (STT_PROVIDER=whisper) -- stand-in until Bhashini access is live
+# Local Whisper (STT_PROVIDER=whisper) lives in requirements-local-asr.txt.
+# It is ~2GB installed and is a developer convenience, not a server
+# dependency -- keeping it here made the deployment image too large to
+# build on a free tier, for a code path production never takes.
+numpy>=1.26            # to_wav_16k_mono() calls frame.to_ndarray(); PyAV
+                       # raises ModuleNotFoundError without it. Same story
+                       # as av below -- it arrived via faster-whisper and
+                       # left with it.
+
+av>=12.0               # Audio decode/resample for the Bhashini path. NOT
+                       # optional: the mobile app records AAC in an MP4
+                       # container, and every real voice note goes through
+                       # to_wav_16k_mono() before upload. It used to arrive
+                       # transitively via faster-whisper, so pulling that
+                       # out of the image removed it silently -- declared
+                       # here so it cannot vanish again.
+
 psycopg2-binary>=2.9   # Postgres driver. SQLite is fine locally, but every
                        # managed host gives you Postgres and an ephemeral
                        # disk -- a SQLite file there is wiped on redeploy.

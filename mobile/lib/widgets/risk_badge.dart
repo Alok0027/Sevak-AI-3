@@ -45,7 +45,7 @@ class RiskBadge extends StatelessWidget {
           color: _color,
           shape: BoxShape.circle,
           border: Border.all(color: Colors.white, width: 1.5),
-          boxShadow: [BoxShadow(color: _color.withOpacity(0.35), blurRadius: 4)],
+          boxShadow: [BoxShadow(color: _color.withValues(alpha: 0.35), blurRadius: 4)],
         ),
       );
     }
@@ -56,9 +56,9 @@ class RiskBadge extends StatelessWidget {
         constraints: const BoxConstraints(minWidth: 52),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          color: _color.withOpacity(0.12),
+          color: _color.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: _color.withOpacity(0.30)),
+          border: Border.all(color: _color.withValues(alpha: 0.30)),
         ),
         child: Text(
           _label,

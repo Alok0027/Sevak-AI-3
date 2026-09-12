@@ -336,7 +336,7 @@ class _Field extends StatelessWidget {
             child: Text(
               value,
               style: isMissing
-                  ? T.body.copyWith(color: T.slate.withOpacity(0.7))
+                  ? T.body.copyWith(color: T.slate.withValues(alpha: 0.7))
                   : T.strong,
             ),
           ),
@@ -430,9 +430,9 @@ class _VisitTile extends StatelessWidget {
                           width: double.infinity,
                           padding: const EdgeInsets.all(T.s2),
                           decoration: BoxDecoration(
-                            color: T.indigo.withOpacity(0.06),
+                            color: T.indigo.withValues(alpha: 0.06),
                             borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: T.indigo.withOpacity(0.25)),
+                            border: Border.all(color: T.indigo.withValues(alpha: 0.25)),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -596,7 +596,7 @@ class _OverrideForm extends StatelessWidget {
             decoration: InputDecoration(
               isDense: true,
               hintText: tr(context, 'reasonHint'),
-              hintStyle: T.body.copyWith(color: T.slate.withOpacity(0.7)),
+              hintStyle: T.body.copyWith(color: T.slate.withValues(alpha: 0.7)),
             ),
           ),
           if (overrideError != null)

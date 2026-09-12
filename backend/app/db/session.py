@@ -7,8 +7,45 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-engine = create_engine(settings.database_url, connect_args=connect_args)
+
+def _normalise(url: str) -> str:
+    """Make a managed host's DATABASE_URL usable by SQLAlchemy 2.
+
+    Render, Railway, Heroku and Fly all hand out `postgres://user:pw@host/db`.
+    SQLAlchemy 1.4 dropped that alias, so 2.x raises
+
+        NoSuchModuleError: Can't load plugin: sqlalchemy.dialects:postgres
+
+    at import time -- before any logging is configured, so what the deploy
+    log actually shows is a container that exited instantly with a
+    traceback about a plugin. Rewriting it here rather than asking every
+    deployer to hand-edit the connection string their platform generated
+    (and which it regenerates on database rotation).
+
+    Also pins psycopg2 explicitly: bare `postgresql://` picks whichever
+    DBAPI is installed, which differs between a laptop with psycopg3 and an
+    image built from requirements.txt.
+    """
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        url = "postgresql+psycopg2://" + url[len("postgresql://"):]
+    return url
+
+
+DATABASE_URL = _normalise(settings.database_url)
+
+connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+
+# pool_pre_ping: free-tier Postgres closes idle connections, and a pooled
+# connection that died while the service was asleep surfaces as a random
+# OperationalError on somebody's first request rather than at startup.
+# Checking liveness costs one round trip and removes that whole failure.
+engine = create_engine(
+    DATABASE_URL,
+    connect_args=connect_args,
+    pool_pre_ping=not DATABASE_URL.startswith("sqlite"),
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
@@ -49,7 +86,7 @@ def _add_missing_sqlite_columns() -> None:
     added after the table already had rows, so an existing local database
     (yours or anyone else's already-seeded copy) picks them up without
     deleting real data."""
-    if not settings.database_url.startswith("sqlite"):
+    if not DATABASE_URL.startswith("sqlite"):
         return
     added_columns = {
         "audit_log": {"details": "TEXT"},

@@ -92,6 +92,29 @@ class Settings(BaseSettings):
     twilio_api_key_secret: str = ""
     twilio_phone_number: str = ""
 
+    # Browser origins allowed to call this API, comma-separated. The
+    # default keeps local development working from any port.
+    #
+    # "*" is correct for a demo backend holding synthetic data and wrong
+    # the moment it holds a real patient's: with credentials in play, a
+    # wildcard means any page the ASHA visits can call this API as her.
+    # Set it to the deployed dashboard origin, e.g.
+    #   CORS_ORIGINS=https://sevakai.vercel.app
+    # The mobile app is unaffected either way -- CORS is a browser rule,
+    # and native HTTP clients do not enforce it.
+    cors_origins: str = "*"
+
+    # Create the SRS section 9 demo accounts at startup if they are absent.
+    #
+    # A freshly provisioned Postgres has no rows, so the first person to
+    # open the deployed app cannot log in -- there is no account to log in
+    # with, and no shell on these platforms' free tier to make one. The
+    # underlying seed is idempotent (it returns early once the demo ASHA
+    # exists), so this adds nothing on redeploy and never overwrites real
+    # data. Off by default: it is a demo convenience, not something a
+    # production database should do to itself on boot.
+    seed_demo_on_start: bool = False
+
     environment: str = "development"
 
 

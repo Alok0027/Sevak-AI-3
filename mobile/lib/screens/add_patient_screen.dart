@@ -6,7 +6,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
 import '../l10n/app_strings.dart';
-import '../models/patient.dart';
 import '../services/api_client.dart';
 import '../theme/tokens.dart';
 import '../widgets/status_group.dart';

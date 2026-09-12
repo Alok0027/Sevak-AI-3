@@ -1,0 +1,110 @@
+# Render blueprint for the SevakAI backend.
+#
+#   Render dashboard -> New -> Blueprint -> pick this repo.
+#
+# Creates the API and its Postgres together, so the database URL is wired
+# in rather than pasted. Two secrets are deliberately NOT in this file and
+# must be set in the Render dashboard before the first deploy -- see
+# `sync: false` below.
+#
+# The dashboard (React) is not here; it deploys to Vercel as a static
+# build. Keeping them apart means a UI change does not rebuild and restart
+# the API.
+
+services:
+  - type: web
+    name: sevakai-api
+    runtime: docker
+    rootDir: backend            # build context == backend/, so the Dockerfile's
+    dockerfilePath: ./Dockerfile # COPY . . picks up app/ and scripts/ and nothing else
+    plan: free
+    region: singapore           # closest Render offers to India; Oregon adds ~200ms per call
+    healthCheckPath: /health    # a failing deploy rolls back instead of serving 502s
+
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sevakai-db
+          property: connectionString
+        # Render emits postgres://… , which SQLAlchemy 2 refuses to load a
+        # dialect for. app/db/session.py rewrites it; nothing to do here.
+
+      - key: JWT_SECRET
+        generateValue: true     # a fresh random secret per environment, never in git
+
+      - key: ENCRYPTION_KEY
+        sync: false
+        # NOT generated: this must be base64 of exactly 32 raw bytes or
+        # app/core/encryption.py refuses to start, and a generated value
+        # that happens not to decode to 32 bytes fails at the first patient
+        # insert rather than at boot. Generate one and paste it in:
+        #     cd backend && python scripts/generate_encryption_key.py
+        #
+        # It is also the one value you cannot lose or rotate casually --
+        # every encrypted patient row is unreadable without the key that
+        # wrote it. Keep a copy somewhere other than Render.
+
+      - key: CORS_ORIGINS
+        sync: false
+        # The deployed dashboard's origin, e.g. https://sevakai.vercel.app
+        # (no trailing slash -- CORS matches the origin exactly). You will
+        # not know this until Vercel has deployed once, so set it after.
+
+      - key: SEED_DEMO_ON_START
+        value: "true"
+        # A new Postgres has no accounts, and the free tier gives you no
+        # shell to make one. Idempotent; turn it off once real data exists.
+
+      # --- Provider switches -------------------------------------------
+      # Everything external stays mocked until its credentials are set, so
+      # a blueprint deploy with no secrets still boots and serves a working
+      # demo rather than 500ing on the first visit.
+      - key: USE_MOCKS
+        value: "true"
+      - key: STT_PROVIDER
+        value: mock             # "bhashini" once BHASHINI_* are set. Never
+                                # "whisper" here: faster-whisper is not in
+                                # the image (see backend/Dockerfile).
+      - key: LLM_PROVIDER
+        value: mock             # "real" once LLM_API_KEY is set
+      - key: WHATSAPP_PROVIDER
+        value: mock             # "meta" once the token below is set
+      - key: SMS_PROVIDER
+        value: mock
+
+      - key: ENVIRONMENT
+        value: production
+
+      # --- Credentials -------------------------------------------------
+      # sync: false means "this blueprint does not carry the value" -- set
+      # each in the Render dashboard for the ones you are actually using.
+      # Left empty, their provider stays on mock and nothing breaks.
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        sync: false
+      - key: LLM_BASE_URL
+        sync: false
+      - key: BHASHINI_API_KEY
+        sync: false
+      - key: BHASHINI_USER_ID
+        sync: false
+      - key: BHASHINI_PIPELINE_ID
+        sync: false
+      - key: WHATSAPP_API_TOKEN
+        sync: false
+        # The token currently in backend/.env is a USER token that expires.
+        # A deployment needs a System User token, which does not -- see the
+        # deployment section of README.md.
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_BUSINESS_ACCOUNT_ID
+        sync: false
+
+databases:
+  - name: sevakai-db
+    plan: free
+    region: singapore           # must match the service, or every query
+                                # crosses a region and the free tier's
+                                # connection limit starts to hurt
+    postgresMajorVersion: "16"

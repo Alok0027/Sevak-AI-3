@@ -14,6 +14,11 @@ analyzer:
     - build/**
     - android/**
     - web/**
+    # Quarantined files awaiting deletion. They are not compiled into the
+    # app and not in git, but the analyzer walks the whole package, so
+    # their warnings were showing up in `flutter analyze` output and
+    # burying the real ones.
+    - _to_delete/**
 
 linter:
   # The lint rules applied to this project can be customized in the

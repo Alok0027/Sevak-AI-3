@@ -1,0 +1,14 @@
+# Optional: run speech recognition locally instead of calling Bhashini.
+#
+#     pip install -r requirements.txt -r requirements-local-asr.txt
+#     STT_PROVIDER=whisper
+#
+# Separate from requirements.txt because this pulls CTranslate2 plus
+# model weights -- around 2GB once the first model downloads. That is
+# fine on a laptop and fatal on a 512MB free-tier build, and the server
+# never uses it: deployed environments set STT_PROVIDER=bhashini, whose
+# client imports faster_whisper lazily and so never touches this.
+#
+# Worth having offline: it is the only speech path that works with no
+# network at all, which is the demo you want when the venue wifi fails.
+faster-whisper>=1.0

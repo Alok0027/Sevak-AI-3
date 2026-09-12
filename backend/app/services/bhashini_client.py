@@ -54,8 +54,11 @@ def to_wav_16k_mono(raw: bytes) -> bytes:
     the right call for an ASHA on a rural connection: the same clip is ~10x
     smaller to upload than raw WAV, and this converts it after it lands.
 
-    PyAV is already a dependency (via faster-whisper) and bundles its own
-    ffmpeg, so this needs no system binary.
+    PyAV bundles its own ffmpeg, so this needs no system binary. It is
+    declared directly in requirements.txt -- it used to come in via
+    faster-whisper, which meant dropping Whisper from the deployment image
+    also removed the decoder this needs, and nothing noticed until an ASHA
+    submitted real audio.
     """
     import av  # imported lazily: only the real Bhashini path needs it
 
