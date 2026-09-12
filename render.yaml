@@ -56,49 +56,81 @@ services:
         # shell to make one. Idempotent; turn it off once real data exists.
 
       # --- Provider switches -------------------------------------------
-      # Everything external stays mocked until its credentials are set, so
-      # a blueprint deploy with no secrets still boots and serves a working
-      # demo rather than 500ing on the first visit.
+      # These match the working local .env: real Bhashini speech, a real
+      # LLM, and the Meta WhatsApp Cloud API. Each one needs its
+      # credentials set below before the first deploy -- a provider set to
+      # real with an empty key fails at the first visit, not at boot.
+      #
+      # If you are deploying before pasting a given credential in, set that
+      # one provider back to "mock" rather than leaving it real and empty.
       - key: USE_MOCKS
-        value: "true"
+        value: "false"
       - key: STT_PROVIDER
-        value: mock             # "bhashini" once BHASHINI_* are set. Never
-                                # "whisper" here: faster-whisper is not in
-                                # the image (see backend/Dockerfile).
+        value: bhashini         # never "whisper" here: faster-whisper is
+                                # not in the image (see backend/Dockerfile)
       - key: LLM_PROVIDER
-        value: mock             # "real" once LLM_API_KEY is set
+        value: real
       - key: WHATSAPP_PROVIDER
-        value: mock             # "meta" once the token below is set
+        value: meta             # the Meta Cloud API, not Twilio's sandbox
       - key: SMS_PROVIDER
-        value: mock
+        value: mock             # "real" turns on the Twilio SMS fallback
+                                # (SRS section 11 risk register). Off here
+                                # because WhatsApp is the delivery channel;
+                                # the TWILIO_* keys below exist for when it
+                                # is wanted as a backup.
 
       - key: ENVIRONMENT
         value: production
 
       # --- Credentials -------------------------------------------------
       # sync: false means "this blueprint does not carry the value" -- set
-      # each in the Render dashboard for the ones you are actually using.
-      # Left empty, their provider stays on mock and nothing breaks.
-      - key: LLM_API_KEY
+      # each in the Render dashboard. They are the same values as in
+      # backend/.env, which is git-ignored and never reaches the image
+      # (see backend/.dockerignore).
+
+      # WhatsApp Cloud API (WHATSAPP_PROVIDER=meta)
+      - key: WHATSAPP_API_TOKEN
         sync: false
-      - key: LLM_MODEL
+        # IMPORTANT: the token in backend/.env is a USER token, which
+        # expires -- a deployment that outlives it starts failing every
+        # send with error 190 and nothing else changes to explain why.
+        # Generate a System User token (Business Settings -> System Users
+        # -> Generate token, no expiry) and use that one here.
+      - key: WHATSAPP_PHONE_NUMBER_ID
         sync: false
-      - key: LLM_BASE_URL
+      - key: WHATSAPP_BUSINESS_ACCOUNT_ID
         sync: false
+      - key: WHATSAPP_TEMPLATE_NAME
+        value: followup_reminder
+        # Must be APPROVED in Meta before it will send. Check with:
+        #   cd backend && PYTHONPATH=. python scripts/create_whatsapp_template.py --list
+      - key: WHATSAPP_TEMPLATE_LANGUAGE
+        value: hi
+
+      # Bhashini (STT_PROVIDER=bhashini)
       - key: BHASHINI_API_KEY
         sync: false
       - key: BHASHINI_USER_ID
         sync: false
       - key: BHASHINI_PIPELINE_ID
         sync: false
-      - key: WHATSAPP_API_TOKEN
+
+      # LLM (LLM_PROVIDER=real) -- Groq in the local .env
+      - key: LLM_API_KEY
         sync: false
-        # The token currently in backend/.env is a USER token that expires.
-        # A deployment needs a System User token, which does not -- see the
-        # deployment section of README.md.
-      - key: WHATSAPP_PHONE_NUMBER_ID
+      - key: LLM_MODEL
+        value: openai/gpt-oss-120b
+      - key: LLM_BASE_URL
+        value: https://api.groq.com/openai/v1
+
+      # Twilio SMS -- only read when SMS_PROVIDER=real above.
+      - key: TWILIO_ACCOUNT_SID
         sync: false
-      - key: WHATSAPP_BUSINESS_ACCOUNT_ID
+      - key: TWILIO_API_KEY_SID
+        sync: false
+      - key: TWILIO_API_KEY_SECRET
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
         sync: false
 
 databases:
