@@ -1,13 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../l10n/app_strings.dart';
 import '../services/api_client.dart';
+import '../theme/tokens.dart';
+import '../widgets/status_group.dart';
 import 'patient_detail_screen.dart';
 
-/// FR-07.3: pending follow-ups sorted by urgency, with a checkbox to mark
-/// one done straight from the app -- this is what feeds real completions
-/// into the ANM/BMO "done vs pending" chart instead of a number that only
-/// ever grows.
+/// FR-07.3: every pending follow-up, soonest due first, with one tap to
+/// mark it done. This is what feeds real completions into the ANM/BMO
+/// "done vs pending" chart instead of a number that only ever grows.
+///
+/// Unlike the home screen's today list — which is collapsed to one row
+/// per person, because she walks to a house rather than to an action —
+/// this list stays one row per follow-up. It is the place where an
+/// individual task gets ticked off, so each one has to be addressable.
 class TaskListScreen extends StatefulWidget {
   final ApiClient api;
   final String workerId;
@@ -42,87 +49,113 @@ class _TaskListScreenState extends State<TaskListScreen> {
       await _refresh();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Marked done: ${task['patient_name']}')),
+        SnackBar(content: Text('${tr(context, 'markedDone')}: ${task['patient_name']}')),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${tr(context, 'failed')}: $e')),
+      );
     } finally {
       if (mounted) setState(() => _completing.remove(actionId));
     }
   }
 
-  Color _riskColor(String? level) {
-    switch (level) {
-      case 'HIGH':
-        return Colors.red;
-      case 'MEDIUM':
-        return Colors.amber.shade700;
-      default:
-        return Colors.green;
-    }
+  /// What the follow-up is and when it's owed, in her language. The server
+  /// sends a ready-made English label alongside the raw bucket and hour
+  /// count; rebuild the phrase here so the row never mixes two languages.
+  String _subtitle(BuildContext context, Map<String, dynamic> t) {
+    final content = (t['content'] as String?)?.trim();
+    final bucket = t['bucket'] as String?;
+    final hours = (t['hours_overdue'] as int?) ?? 0;
+    final due = t['due_at'] != null ? DateTime.parse(t['due_at'] as String).toLocal() : null;
+
+    final when = switch (bucket) {
+      'overdue' => hours < 24
+          ? '$hours${tr(context, 'hoursOverdue')}'
+          : '${hours ~/ 24}${tr(context, 'daysOverdue')}',
+      'due_today' => tr(context, 'dueToday'),
+      'upcoming' => due != null
+          ? '${tr(context, 'due')} ${DateFormat.MMMd().format(due)}'
+          : tr(context, 'upcoming'),
+      _ => tr(context, 'noDateSet'),
+    };
+    return (content == null || content.isEmpty) ? when : '$content  ·  $when';
   }
 
   @override
   Widget build(BuildContext context) {
     return RefreshIndicator(
+      color: T.forest,
       onRefresh: _refresh,
       child: FutureBuilder<List<Map<String, dynamic>>>(
         future: _tasksFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return const Center(child: CircularProgressIndicator(color: T.forest));
           }
           if (snapshot.hasError) {
-            return ListView(children: [
-              const SizedBox(height: 100),
-              Center(child: Text('Failed to load: ${snapshot.error}')),
-            ]);
+            return ListView(
+              padding: const EdgeInsets.all(T.s4),
+              children: [
+                const SizedBox(height: T.s8),
+                Invitation(
+                  icon: Icons.wifi_off_rounded,
+                  message: '${tr(context, 'failedToLoad')}: ${snapshot.error}',
+                ),
+              ],
+            );
           }
           final tasks = snapshot.data ?? [];
           if (tasks.isEmpty) {
-            return ListView(children: const [
-              SizedBox(height: 100),
-              Center(child: Text('No pending follow-ups. Great work!')),
-            ]);
-          }
-          final now = DateTime.now();
-          return ListView.separated(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            itemCount: tasks.length,
-            separatorBuilder: (_, __) => const Divider(height: 1),
-            itemBuilder: (context, i) {
-              final t = tasks[i];
-              final actionId = t['action_id'] as String;
-              final dueAt = t['due_at'] != null ? DateTime.parse(t['due_at'] as String) : null;
-              final overdue = dueAt != null && dueAt.isBefore(now);
-              final busy = _completing.contains(actionId);
-              return ListTile(
-                leading: CircleAvatar(backgroundColor: _riskColor(t['risk_level'] as String?), radius: 8),
-                title: Text(t['patient_name'] as String),
-                subtitle: Text(
-                  '${t['content']}${dueAt != null ? '\nDue ${DateFormat.MMMd().add_jm().format(dueAt)}' : ''}',
-                  style: overdue ? const TextStyle(color: Colors.red) : null,
+            return ListView(
+              padding: const EdgeInsets.all(T.s4),
+              children: [
+                const SizedBox(height: T.s8),
+                Invitation(
+                  icon: Icons.check_circle_outline,
+                  message: tr(context, 'noFollowUps'),
                 ),
-                isThreeLine: dueAt != null,
-                onTap: () {
-                  final patientId = t['patient_id'] as String?;
-                  if (patientId == null) return;
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => PatientDetailScreen(api: widget.api, patientId: patientId),
+              ],
+            );
+          }
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(T.s4, T.s4, T.s4, T.s8),
+            children: [
+              StatusGroup(
+                children: [
+                  for (final t in tasks)
+                    StatusRow(
+                      railColour: T.risk(t['risk_level'] as String?),
+                      // Her registered name, never translated.
+                      title: t['patient_name'] as String,
+                      subtitle: _subtitle(context, t),
+                      subtitleIsUrgent: t['bucket'] == 'overdue',
+                      trailing: _completing.contains(t['action_id'])
+                          ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: T.forest),
+                            )
+                          : IconButton(
+                              icon: const Icon(Icons.check_circle_outline, color: T.forest),
+                              tooltip: tr(context, 'markDone'),
+                              onPressed: () => _complete(t),
+                            ),
+                      onTap: () {
+                        final patientId = t['patient_id'] as String?;
+                        if (patientId == null) return;
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                PatientDetailScreen(api: widget.api, patientId: patientId),
+                          ),
+                        );
+                      },
                     ),
-                  );
-                },
-                trailing: busy
-                    ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
-                    : IconButton(
-                        icon: const Icon(Icons.check_circle_outline),
-                        tooltip: 'Mark done',
-                        onPressed: () => _complete(t),
-                      ),
-              );
-            },
+                ],
+              ),
+            ],
           );
         },
       ),

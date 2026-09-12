@@ -34,7 +34,14 @@ async def main() -> None:
     settings = get_settings()
     try:
         worker = db.query(Worker).filter(Worker.phone == "9999999999").first()
-        patient = db.query(Patient).filter(Patient.name == "Meera Patil").first()
+        # Patient.name is encrypted at rest (NFR-SC1) -- a SQL-level `==`
+        # filter can't match it (AES-GCM's random nonce means the same name
+        # never encrypts to the same ciphertext twice), so filter in Python
+        # after the ORM has transparently decrypted each row instead.
+        patient = next(
+            (p for p in db.query(Patient).filter(Patient.worker_id == worker.worker_id).all() if p.name == "Meera Patil"),
+            None,
+        ) if worker else None
         if worker is None or patient is None:
             print("Demo fixtures not found. Run: python -m scripts.seed_synthetic_data")
             return
@@ -70,7 +77,15 @@ async def main() -> None:
               f"({worker.worker_id[:8]}...)")
         print(f"\nvisit_id = {response.visit_id}")
         print("=" * 70)
-        print("Done. Everything above ran with zero network calls (USE_MOCKS=true).")
+        if settings.llm_provider.lower() == "real":
+            print(
+                "Done. Agent 1's extraction, Agent 2's risk classification, and "
+                f"Agent 3's referral/WhatsApp drafts above were real LLM calls to "
+                f"{settings.llm_base_url} ({settings.llm_model}); everything else "
+                "ran with zero network calls."
+            )
+        else:
+            print("Done. Everything above ran with zero network calls (LLM_PROVIDER=mock).")
     finally:
         db.close()
 

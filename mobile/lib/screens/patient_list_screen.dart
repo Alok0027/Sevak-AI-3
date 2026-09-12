@@ -1,16 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../l10n/app_strings.dart';
 import '../models/patient.dart';
 import '../services/api_client.dart';
-import '../widgets/risk_badge.dart';
+import '../theme/tokens.dart';
+import '../widgets/status_group.dart';
 import 'add_patient_screen.dart';
 import 'patient_detail_screen.dart';
 import 'voice_record_screen.dart';
 
-/// FR-07.2: worker's patient list with risk badges. Tap a patient to see
-/// her full visit history; tap the mic to jump straight into recording a
-/// new visit.
+/// FR-07.2: the ASHA's own patients, each row carrying its risk in the
+/// leading rail rather than a badge. Tap a row for her full history; tap
+/// the mic to go straight into recording a visit.
 class PatientListScreen extends StatefulWidget {
   final ApiClient api;
   final String workerId;
@@ -45,7 +47,9 @@ class _PatientListScreenState extends State<PatientListScreen> {
 
   Future<void> _recordVisit(Patient p) async {
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => VoiceRecordScreen(api: widget.api, workerId: widget.workerId, patient: p)),
+      MaterialPageRoute(
+        builder: (_) => VoiceRecordScreen(api: widget.api, workerId: widget.workerId, patient: p),
+      ),
     );
     widget.onVisitRecorded?.call();
     _refresh();
@@ -60,102 +64,132 @@ class _PatientListScreenState extends State<PatientListScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('${created.name} added.'),
-        action: SnackBarAction(label: 'Record visit', onPressed: () => _recordVisit(created)),
+        content: Text('${created.name} — ${tr(context, 'patientAdded')}'),
+        action: SnackBarAction(
+          label: tr(context, 'recordVisit'),
+          textColor: Colors.white,
+          onPressed: () => _recordVisit(created),
+        ),
       ),
     );
+  }
+
+  /// "32 yrs · Wagholi · 4 visits · last 3 Sep" -- built from whatever is
+  /// actually recorded, so a patient with only a name gets a short line
+  /// rather than a line full of dashes.
+  String _subtitle(BuildContext context, Patient p) {
+    final parts = <String>[
+      if (p.age != null) '${p.age} ${tr(context, 'years')}',
+      if (p.village != null && p.village!.isNotEmpty) p.village!,
+    ];
+    if (p.lastVisit != null) {
+      parts.add('${p.totalVisits} ${tr(context, 'visits')}');
+      parts.add('${tr(context, 'lastVisited')} ${DateFormat.MMMd().format(p.lastVisit!.toLocal())}');
+    } else {
+      parts.add(tr(context, 'noVisitsRecordedYet'));
+    }
+    return parts.join('  ·  ');
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: T.forest,
+        foregroundColor: Colors.white,
         onPressed: _addPatient,
-        icon: const Icon(Icons.person_add),
-        label: const Text('Add patient'),
+        icon: const Icon(Icons.person_add_alt_1),
+        label: Text(tr(context, 'addPatient'), style: T.strong.copyWith(color: Colors.white)),
       ),
       body: Column(
         children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-          child: TextField(
-            decoration: const InputDecoration(
-              hintText: 'Search patients...',
-              prefixIcon: Icon(Icons.search),
-              border: OutlineInputBorder(),
-              isDense: true,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(T.s4, T.s4, T.s4, T.s2),
+            child: TextField(
+              style: T.body,
+              decoration: InputDecoration(
+                hintText: tr(context, 'searchPatients'),
+                hintStyle: T.body.copyWith(color: T.slate.withOpacity(0.8)),
+                prefixIcon: const Icon(Icons.search, color: T.slate),
+                isDense: true,
+              ),
+              onChanged: (v) => setState(() => _search = v.toLowerCase().trim()),
             ),
-            onChanged: (v) => setState(() => _search = v.toLowerCase().trim()),
           ),
-        ),
-        Expanded(
-          child: RefreshIndicator(
-            onRefresh: _refresh,
-            child: FutureBuilder<List<Patient>>(
-              future: _patientsFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snapshot.hasError) {
-                  return ListView(children: [
-                    const SizedBox(height: 100),
-                    Center(child: Text('Failed to load: ${snapshot.error}')),
-                  ]);
-                }
-                final all = snapshot.data ?? [];
-                final patients =
-                    _search.isEmpty ? all : all.where((p) => p.name.toLowerCase().contains(_search)).toList();
-                if (patients.isEmpty) {
-                  return ListView(children: [
-                    const SizedBox(height: 100),
-                    Center(
-                      child: Text(
-                        all.isEmpty
-                            ? 'No patients yet. Tap "Add patient" below to register your first one.'
-                            : 'No patients match "$_search".',
-                      ),
-                    ),
-                  ]);
-                }
-                return ListView.separated(
-                  itemCount: patients.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (context, i) {
-                    final p = patients[i];
-                    final subtitleParts = <String>[
-                      if (p.age != null) '${p.age}y',
-                      if (p.village != null) p.village!,
-                    ];
-                    final subtitle = p.lastVisit != null
-                        ? '${subtitleParts.isNotEmpty ? '${subtitleParts.join(' · ')} · ' : ''}'
-                            '${p.totalVisits} visit(s) · last ${DateFormat.yMMMd().format(p.lastVisit!)}'
-                        : '${subtitleParts.isNotEmpty ? '${subtitleParts.join(' · ')} · ' : ''}No visits recorded yet';
-                    return ListTile(
-                      leading: RiskBadge(riskStatus: p.riskStatus),
-                      title: Text(p.name),
-                      subtitle: Text(subtitle),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.mic),
-                        tooltip: 'Record a visit',
-                        onPressed: () => _recordVisit(p),
-                      ),
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => PatientDetailScreen(
-                            api: widget.api,
-                            patientId: p.id,
-                            onVisitRecorded: widget.onVisitRecorded,
-                          ),
+          Expanded(
+            child: RefreshIndicator(
+              color: T.forest,
+              onRefresh: _refresh,
+              child: FutureBuilder<List<Patient>>(
+                future: _patientsFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator(color: T.forest));
+                  }
+                  if (snapshot.hasError) {
+                    return ListView(
+                      padding: const EdgeInsets.all(T.s4),
+                      children: [
+                        const SizedBox(height: T.s8),
+                        Invitation(
+                          icon: Icons.wifi_off_rounded,
+                          message: '${tr(context, 'failedToLoad')}: ${snapshot.error}',
                         ),
-                      ),
+                      ],
                     );
-                  },
-                );
-              },
+                  }
+                  final all = snapshot.data ?? [];
+                  final patients = _search.isEmpty
+                      ? all
+                      : all.where((p) => p.name.toLowerCase().contains(_search)).toList();
+                  if (patients.isEmpty) {
+                    return ListView(
+                      padding: const EdgeInsets.all(T.s4),
+                      children: [
+                        const SizedBox(height: T.s8),
+                        Invitation(
+                          icon: all.isEmpty ? Icons.person_add_alt_1 : Icons.search_off,
+                          message: all.isEmpty
+                              ? tr(context, 'noPatients')
+                              : tr(context, 'noPatientsMatch'),
+                        ),
+                      ],
+                    );
+                  }
+                  return ListView(
+                    padding: const EdgeInsets.fromLTRB(T.s4, T.s2, T.s4, 96),
+                    children: [
+                      StatusGroup(
+                        children: [
+                          for (final p in patients)
+                            StatusRow(
+                              railColour: T.risk(p.riskStatus),
+                              // Her registered name, never translated.
+                              title: p.name,
+                              subtitle: _subtitle(context, p),
+                              trailing: IconButton(
+                                icon: const Icon(Icons.mic, color: T.forest),
+                                tooltip: tr(context, 'recordAVisit'),
+                                onPressed: () => _recordVisit(p),
+                              ),
+                              onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => PatientDetailScreen(
+                                    api: widget.api,
+                                    patientId: p.id,
+                                    onVisitRecorded: widget.onVisitRecorded,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  );
+                },
+              ),
             ),
           ),
-        ),
         ],
       ),
     );

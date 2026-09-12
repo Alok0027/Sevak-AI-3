@@ -1,4 +1,66 @@
+from datetime import datetime
+
 from pydantic import BaseModel
+
+
+class FollowupDue(BaseModel):
+    """One *patient* an ASHA owes a visit, and how late the most urgent
+    reason to go is.
+
+    One row per person, not per pending action row. An ASHA walks to a
+    house and a supervisor chases a name: a patient with forty
+    outstanding follow-ups is still one doorstep and one phone call.
+    Listing her forty times buries every other patient in the sub-centre
+    and makes the table read as a single repeated name.
+
+    `also_pending` counts the *other* follow-ups waiting at the same
+    address, so the collapse hides nothing; every field above it
+    describes the most urgent one."""
+
+    action_id: str
+    visit_id: str
+    patient_id: str
+    patient_name: str
+    village: str | None = None
+    risk_level: str
+    due_at: datetime | None = None
+    bucket: str  # overdue | due_today | upcoming | unscheduled
+    hours_overdue: int = 0
+    label: str  # "3d overdue" / "Due today" -- phrased once, server-side
+    content: str
+    also_pending: int = 0
+
+
+class WorkerFollowupCompliance(BaseModel):
+    """One ASHA's outstanding visits.
+
+    Workers with nothing outstanding are still listed, with zero counts: a
+    supervisor needs to see that everyone is accounted for, not only who
+    is in trouble. An absent row is ambiguous -- no work, or no data?
+
+    The counts are *patients*, matching the rows in `visits`. A count of
+    pending action rows would disagree with the list underneath it, and a
+    supervisor comparing "228 overdue" against four visible names would
+    reasonably conclude the page was broken. `total_pending_actions`
+    keeps the raw workload figure available for anyone who wants it.
+    """
+
+    worker_id: str
+    worker_name: str
+    sub_centre_id: str | None = None
+    overdue: int = 0
+    due_today: int = 0
+    upcoming: int = 0
+    total_pending_actions: int = 0
+    visits: list[FollowupDue] = []
+
+
+class FollowupComplianceResponse(BaseModel):
+    as_of: datetime
+    total_overdue: int
+    total_due_today: int
+    total_upcoming: int
+    workers: list[WorkerFollowupCompliance]
 
 
 class RiskPoint(BaseModel):

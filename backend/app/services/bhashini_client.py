@@ -11,21 +11,102 @@ Three implementations behind one interface, selected by STT_PROVIDER:
     the model weights are cached -- this is the stand-in while Bhashini
     access is pending, so we can demo genuine voice recognition (e.g. to a
     capstone mentor) without waiting on API approval.
-  - BhashiniClient ("bhashini"): real ULCA pipeline call. Fill in
-    BHASHINI_* env vars and set STT_PROVIDER=bhashini to switch over --
-    no other file needs to change, since all three implement transcribe().
+  - BhashiniClient ("bhashini"): real ULCA pipeline call, as a genuine
+    two-step flow (confirmed working against the live API):
+      1. POST {base_url}/ulca/apis/v0/model/getModelsPipeline with
+         userID/ulcaApiKey headers -- returns the assigned ASR serviceId
+         plus a per-call inferenceApiKey + callbackUrl.
+      2. POST that callbackUrl with the returned inferenceApiKey as the
+         Authorization header -- returns the actual transcript.
+    Fill in BHASHINI_* env vars and set STT_PROVIDER=bhashini to switch
+    over -- no other file needs to change, since all three implement
+    transcribe(). BHASHINI_USER_ID is the Bhashini application ID (not a
+    personal user id); BHASHINI_API_KEY is the "Udyat Key" shown on the
+    Bhashini dashboard's API Keys page; BHASHINI_PIPELINE_ID is one of the
+    two standard published pipeline ids (MeitY's or AI4Bharat's), not
+    something per-account -- see bhashini.gitbook.io/bhashini-apis.
 
-Real API reference: bhashini.gov.in/ulca -> POST {base_url}/ulca/apis/v0/model/pipeline
+Real API reference: bhashini.gitbook.io/bhashini-apis (Pipeline Config Call, Pipeline Compute Call)
 """
 import asyncio
 import base64
+import io
 import os
 import tempfile
+import wave
 from abc import ABC, abstractmethod
 
 import httpx
 
 from app.core.config import Settings
+
+
+def to_wav_16k_mono(raw: bytes) -> bytes:
+    """Decode any audio container we're given and re-encode it as 16kHz mono
+    16-bit PCM WAV.
+
+    The compute call below *tells* Bhashini the audio is "wav" at 16000Hz, so
+    this makes that true rather than trusting the caller. Mobile records AAC
+    in an MP4 container (the record plugin falls back to the platform
+    recorder on Android regardless of the encoder we ask for), and handing
+    that to Bhashini as "wav" crashes their decoder with a bare 500 -- the
+    exact failure this fixes. Keeping the phone on compressed audio is also
+    the right call for an ASHA on a rural connection: the same clip is ~10x
+    smaller to upload than raw WAV, and this converts it after it lands.
+
+    PyAV is already a dependency (via faster-whisper) and bundles its own
+    ffmpeg, so this needs no system binary.
+    """
+    import av  # imported lazily: only the real Bhashini path needs it
+
+    resampler = av.AudioResampler(format="s16", layout="mono", rate=16000)
+    chunks = []
+    try:
+        with av.open(io.BytesIO(raw)) as container:
+            for frame in container.decode(audio=0):
+                for resampled in resampler.resample(frame):
+                    chunks.append(resampled.to_ndarray().tobytes())
+        for resampled in resampler.resample(None):  # flush
+            chunks.append(resampled.to_ndarray().tobytes())
+    except Exception as exc:
+        raise RuntimeError(
+            f"Could not decode the submitted audio ({len(raw)} bytes starting "
+            f"{raw[:12]!r}): {exc}"
+        ) from exc
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(16000)
+        out.writeframes(b"".join(chunks))
+    return buf.getvalue()
+
+
+def describe_audio(audio_base64: str) -> str:
+    """Summarise what we actually sent, for an ASR failure message.
+
+    A rejected ASR call is nearly always about the audio, and the useful
+    question is whether what we sent matches what we *told* the API it was
+    ("wav", 16kHz, mono). "16000Hz, 1ch, 16-bit, 3.2s" vs "not a RIFF/WAVE
+    file at all" points straight at the cause; the raw status code doesn't.
+    """
+    try:
+        raw = base64.b64decode(audio_base64)
+    except Exception:
+        return "audio that isn't valid base64"
+    if raw[:4] != b"RIFF" or raw[8:12] != b"WAVE":
+        return f"{len(raw)} bytes starting {raw[:12]!r} -- not a RIFF/WAVE file"
+    try:
+        with wave.open(io.BytesIO(raw)) as w:
+            framerate = w.getframerate()
+            seconds = w.getnframes() / framerate if framerate else 0
+            return (
+                f"{len(raw)} bytes of WAV: {framerate}Hz, {w.getnchannels()}ch, "
+                f"{w.getsampwidth() * 8}-bit, {seconds:.1f}s"
+            )
+    except Exception as exc:
+        return f"{len(raw)} bytes of WAV with an unreadable header ({exc})"
 
 
 class BhashiniClientBase(ABC):
@@ -46,45 +127,100 @@ class MockBhashiniClient(BhashiniClientBase):
 
 
 class BhashiniClient(BhashiniClientBase):
-    """Real Bhashini ULCA pipeline client. TODO before going live:
-    1. Register at bhashini.gov.in/ulca, get BHASHINI_API_KEY / USER_ID / PIPELINE_ID.
-    2. Confirm the pipeline config below matches the ASR model you were assigned.
-    """
+    """Real Bhashini ULCA pipeline client -- genuine two-step flow (Pipeline
+    Config Call, then Pipeline Compute Call), confirmed against the live API
+    with real credentials during development. No fallback to the mock on
+    failure (matches WhatsAppClient/TwilioSmsClient -- a real external-call
+    failure here should surface, not be silently swallowed)."""
 
     def __init__(self, settings: Settings):
         self.settings = settings
 
     async def transcribe(self, audio_base64: str, language_code: str) -> str:
+        # Normalise to the format we're about to claim this audio is, before
+        # claiming it. Decoding is CPU-bound, so keep it off the event loop.
+        wav = await asyncio.to_thread(to_wav_16k_mono, base64.b64decode(audio_base64))
+        audio_base64 = base64.b64encode(wav).decode()
+
         headers = {
             "userID": self.settings.bhashini_user_id,
             "ulcaApiKey": self.settings.bhashini_api_key,
             "Content-Type": "application/json",
         }
-        payload = {
+        config_payload = {
             "pipelineTasks": [
-                {
-                    "taskType": "asr",
-                    "config": {
-                        "language": {"sourceLanguage": language_code},
-                        "serviceId": self.settings.bhashini_pipeline_id,
-                        "audioFormat": "wav",
-                        "samplingRate": 16000,
-                    },
-                }
+                {"taskType": "asr", "config": {"language": {"sourceLanguage": language_code}}}
             ],
-            "inputData": {"audio": [{"audioContent": audio_base64}]},
+            "pipelineRequestConfig": {"pipelineId": self.settings.bhashini_pipeline_id},
         }
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                f"{self.settings.bhashini_base_url}/ulca/apis/v0/model/pipeline",
+        async with httpx.AsyncClient(timeout=15) as client:
+            # Step 1: Pipeline Config Call -- tells us which ASR serviceId
+            # we've been assigned for this language, plus a per-call
+            # inferenceApiKey + callbackUrl for step 2. This is NOT the
+            # same as the static "Inference" key shown on the Bhashini
+            # dashboard -- that dashboard value is a separate credential;
+            # the real per-request token always comes from this response.
+            config_resp = await client.post(
+                f"{self.settings.bhashini_base_url}/ulca/apis/v0/model/getModelsPipeline",
                 headers=headers,
-                json=payload,
+                json=config_payload,
             )
-            resp.raise_for_status()
-            data = resp.json()
-            # NOTE: exact response shape depends on the assigned ASR service --
-            # adjust this parse once real credentials are available.
-            return data["pipelineResponse"][0]["output"][0]["source"]
+            config_resp.raise_for_status()
+            config_data = config_resp.json()
+
+            asr_config = config_data["pipelineResponseConfig"][0]["config"][0]
+            service_id = asr_config["serviceId"]
+            endpoint = config_data["pipelineInferenceAPIEndPoint"]
+            callback_url = endpoint["callbackUrl"]
+            inference_key = endpoint["inferenceApiKey"]
+
+            # Step 2: Pipeline Compute Call -- the actual ASR inference,
+            # authenticated with the token we just got back above.
+            compute_payload = {
+                "pipelineTasks": [
+                    {
+                        "taskType": "asr",
+                        "config": {
+                            "language": {"sourceLanguage": language_code},
+                            "serviceId": service_id,
+                            "audioFormat": "wav",
+                            "samplingRate": 16000,
+                        },
+                    }
+                ],
+                # inputData.input is required by the real API even for a
+                # pure ASR task (confirmed against bhashini.gitbook.io's
+                # Pipeline Compute Call request-payload example) -- omitting
+                # it entirely doesn't get a clean 400, it crashes the model
+                # service with a bare "Internal Server Error" (no JSON body).
+                # The doc example shows "source": null, but the live API
+                # actually 422s on that ("none is not an allowed value") --
+                # it wants a string, so an empty one is what the docs meant.
+                "inputData": {
+                    "input": [{"source": ""}],
+                    "audio": [{"audioContent": audio_base64}],
+                },
+            }
+            compute_resp = await client.post(
+                callback_url,
+                headers={
+                    inference_key["name"]: inference_key["value"],
+                    "Content-Type": "application/json",
+                },
+                json=compute_payload,
+            )
+            if compute_resp.status_code >= 400:
+                # raise_for_status() alone drops the response body, which is
+                # exactly where Bhashini explains *why* (bad audio format,
+                # unsupported serviceId, etc) -- surface it so a real failure
+                # is debuggable from the backend log alone.
+                raise RuntimeError(
+                    f"Bhashini inference call failed ({compute_resp.status_code}): "
+                    f"{compute_resp.text[:500]} "
+                    f"[serviceId={service_id}, sent {describe_audio(audio_base64)}]"
+                )
+            compute_data = compute_resp.json()
+            return compute_data["pipelineResponse"][0]["output"][0]["source"]
 
 
 class WhisperSttClient(BhashiniClientBase):

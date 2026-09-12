@@ -13,3 +13,6 @@ reportlab>=4.2
 httpx>=0.27
 pytest>=8.2
 faster-whisper>=1.0   # local, self-hosted ASR (STT_PROVIDER=whisper) -- stand-in until Bhashini access is live
+psycopg2-binary>=2.9   # Postgres driver. SQLite is fine locally, but every
+                       # managed host gives you Postgres and an ephemeral
+                       # disk -- a SQLite file there is wiped on redeploy.

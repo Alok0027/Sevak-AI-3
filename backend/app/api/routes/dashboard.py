@@ -20,12 +20,16 @@ from app.schemas.dashboard import (
     DashboardAnalytics,
     DashboardMetrics,
     DayCount,
+    FollowupComplianceResponse,
+    FollowupDue,
     FollowupStatus,
     HeatmapResponse,
     RiskBreakdown,
     RiskPoint,
+    WorkerFollowupCompliance,
     WorkerLeaderboardEntry,
 )
+from app.services import followup_schedule
 
 router = APIRouter(prefix="/api/v1/dashboard", tags=["dashboard"])
 
@@ -41,6 +45,14 @@ def _village_to_latlng(village: str) -> tuple[float, float]:
     lat = _MH_LAT_RANGE[0] + frac_lat * (_MH_LAT_RANGE[1] - _MH_LAT_RANGE[0])
     lng = _MH_LNG_RANGE[0] + frac_lng * (_MH_LNG_RANGE[1] - _MH_LNG_RANGE[0])
     return round(lat, 5), round(lng, 5)
+
+
+def _due_sort(due_at: datetime | None) -> datetime:
+    """Sort key for a nullable deadline. An unscheduled follow-up sorts
+    last rather than crashing the comparison or jumping to the top."""
+    if due_at is None:
+        return datetime.max.replace(tzinfo=timezone.utc)
+    return due_at if due_at.tzinfo else due_at.replace(tzinfo=timezone.utc)
 
 
 def _scoped_visits(db: Session, scope: str | None) -> SAQuery:
@@ -196,4 +208,115 @@ def analytics(
         risk_breakdown=risk_breakdown,
         followup_status=followup_status,
         worker_leaderboard=worker_leaderboard,
+    )
+
+
+@router.get("/followup-compliance", response_model=FollowupComplianceResponse)
+def followup_compliance(
+    db: DbSession,
+    user=Depends(require_roles("anm", "bmo", "admin")),
+) -> FollowupComplianceResponse:
+    """FR-08 accountability: which ASHA owes which patient a visit, and
+    which of those are already late.
+
+    The analytics endpoint gives a supervisor three numbers -- done,
+    pending, overdue -- which tells her something is wrong but not who to
+    call. This returns the underlying rows: the worker, the patient, the
+    deadline, and how far past it we are, so a BMO can act on a specific
+    name rather than a count.
+
+    Every ASHA in scope is listed even with nothing outstanding, because
+    an absent row is ambiguous (no work, or no data?) and 'everyone else
+    is clear' is itself the answer a supervisor is looking for.
+    """
+    scope = get_supervisor_scope(user, db)
+    now = datetime.now(timezone.utc)
+
+    workers = db.query(Worker).filter(Worker.role == "asha")
+    if scope:
+        workers = workers.filter(Worker.sub_centre_id == scope)
+    workers = workers.order_by(Worker.name).all()
+    by_worker = {
+        w.worker_id: WorkerFollowupCompliance(
+            worker_id=w.worker_id, worker_name=w.name, sub_centre_id=w.sub_centre_id
+        )
+        for w in workers
+    }
+
+    rows = (
+        db.query(Action, Visit, Patient)
+        .join(Visit, Action.visit_id == Visit.visit_id)
+        .join(Patient, Visit.patient_id == Patient.patient_id)
+        .filter(
+            Action.type == "followup",
+            Action.status == "pending",
+            Visit.worker_id.in_(by_worker.keys()) if by_worker else False,
+        )
+        .all()
+    )
+
+    # Collapse to one row per patient per worker, keeping the most urgent
+    # follow-up as the visible reason and counting the rest. Done here
+    # rather than in the page so that the mobile app, the ANM view and the
+    # BMO view can never disagree about how many people are behind.
+    most_urgent: dict[tuple[str, str], FollowupDue] = {}
+    for action, visit, patient in rows:
+        entry = by_worker.get(visit.worker_id)
+        if entry is None:  # visit by someone outside this supervisor's scope
+            continue
+        entry.total_pending_actions += 1
+        bucket, hours_overdue = followup_schedule.classify(action.due_at, now)
+        key = (visit.worker_id, patient.patient_id)
+        existing = most_urgent.get(key)
+        if existing is not None:
+            existing.also_pending += 1
+            # Keep whichever is further past its deadline; for two that are
+            # not yet due, whichever falls due first.
+            if (hours_overdue, _due_sort(action.due_at)) <= (
+                existing.hours_overdue,
+                _due_sort(existing.due_at),
+            ):
+                continue
+            replacement_of = existing.also_pending
+        else:
+            replacement_of = 0
+
+        most_urgent[key] = FollowupDue(
+            action_id=action.action_id,
+            visit_id=visit.visit_id,
+            patient_id=patient.patient_id,
+            patient_name=patient.name,
+            village=patient.village,
+            risk_level=visit.risk_level,
+            due_at=action.due_at,
+            bucket=bucket,
+            hours_overdue=hours_overdue,
+            label=followup_schedule.describe(bucket, hours_overdue),
+            content=action.content,
+            also_pending=replacement_of,
+        )
+
+    for (worker_id, _patient_id), due in most_urgent.items():
+        entry = by_worker[worker_id]
+        entry.visits.append(due)
+        if due.bucket == followup_schedule.OVERDUE:
+            entry.overdue += 1
+        elif due.bucket == followup_schedule.DUE_TODAY:
+            entry.due_today += 1
+        else:
+            entry.upcoming += 1
+
+    for entry in by_worker.values():
+        # Most overdue first: that is the order a supervisor works down.
+        entry.visits.sort(key=lambda v: (-v.hours_overdue, _due_sort(v.due_at)))
+
+    ordered = sorted(
+        by_worker.values(), key=lambda w: (-w.overdue, -w.due_today, w.worker_name)
+    )
+    return FollowupComplianceResponse(
+        as_of=now,
+        total_overdue=sum(w.overdue for w in ordered),
+        total_due_today=sum(w.due_today for w in ordered),
+        total_upcoming=sum(w.upcoming for w in ordered),
+        workers=ordered,
     )

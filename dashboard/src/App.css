@@ -1,495 +1,1248 @@
-/* --- Login --- */
-.login-page {
+/* Components, in the order a page is built: shell, page furniture,
+ * summary strip, sections, lists, tables, charts, forms, detail pages.
+ *
+ * Two rules run through all of it:
+ *
+ *   The status rail. A 3px bar on the leading edge of a row carries its
+ *   severity. It is the same motif as the Flutter app, and it replaces
+ *   the coloured card / filled badge vocabulary the first version used.
+ *
+ *   Colour means something is wrong, or that a person decided it.
+ *   Forest is identity and system output, indigo is human judgment, the
+ *   risk ramp is instrumentation, and low risk is grey so that a settled
+ *   patient costs a supervisor no attention. Nothing is coloured for
+ *   decoration. */
+
+/* ── Shell ───────────────────────────────────────────────────────────── */
+
+.shell {
+  display: grid;
+  grid-template-columns: 244px minmax(0, 1fr);
   min-height: 100vh;
+}
+
+.rail {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s6);
+  padding: var(--s6) var(--s4);
+  background: var(--surface);
+  border-right: 1px solid var(--hairline);
+}
+
+.rail-brand {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: var(--s2);
+  padding: 0 var(--s2);
 }
 
-.login-card {
-  background: var(--panel-bg);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 32px;
-  width: 320px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+/* The wordmark's mark is the status rail stood on end. */
+.rail-mark {
+  width: var(--rail);
+  height: 20px;
+  border-radius: 2px;
+  background: var(--forest);
 }
 
-.login-card h1 {
+.rail-wordmark {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.rail-nav {
+  list-style: none;
   margin: 0;
-  color: var(--brand);
-}
-
-.login-card .subtitle {
-  margin: 0 0 12px;
-  color: var(--text-muted);
-}
-
-.login-card label {
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--text-muted);
+  gap: 2px;
 }
 
-.login-card .hint {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-top: 8px;
-}
-
-/* --- Dashboard --- */
-.dashboard-page {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 24px;
-}
-
-.dashboard-header {
+.rail-link {
   display: flex;
+  align-items: stretch;
+  gap: var(--s2);
+  padding: var(--s2) var(--s2) var(--s2) 0;
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  text-decoration: none;
+  transition: background-color var(--fast) var(--ease);
+}
+
+.rail-link:hover {
+  background: var(--paper);
+}
+
+/* Active is the rail motif again, not a filled pill. */
+.rail-link-bar {
+  width: var(--rail);
+  border-radius: 2px;
+  background: transparent;
+  transition: background-color var(--fast) var(--ease);
+}
+
+.rail-link.is-active {
+  background: var(--sage);
+}
+
+.rail-link.is-active .rail-link-bar {
+  background: var(--forest);
+}
+
+.rail-link-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.rail-link-label {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.rail-link.is-active .rail-link-label {
+  color: var(--forest);
+}
+
+.rail-link-hint {
+  font-size: 11.5px;
+  color: var(--slate);
+  line-height: 1.35;
+}
+
+.rail-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+/* Scope sits with identity because identity is what decides it. */
+.rail-scope {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--slate);
+  padding: var(--s2) var(--s3);
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+}
+
+.rail-user {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 0 var(--s2);
+  min-width: 0;
+}
+
+.rail-user-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.rail-user-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rail-user-role {
+  font-size: 11.5px;
+  color: var(--slate);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rail-signout {
+  width: 100%;
+}
+
+.shell-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Page furniture ──────────────────────────────────────────────────── */
+
+.page-head {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: flex-end;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
+  gap: var(--s4);
+  flex-wrap: wrap;
+  padding: var(--s6) var(--s8) var(--s4);
+  /* Nearly opaque. At 88% the table scrolling underneath showed through
+     as a smear of half-legible rows, which reads as a rendering fault
+     rather than as depth. */
+  background: color-mix(in srgb, var(--paper) 96%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--hairline);
 }
 
-.dashboard-header h1 {
-  margin: 0;
-  color: var(--brand);
-  font-size: 22px;
+.page-head-text {
+  min-width: 0;
 }
 
-.header-actions {
+.page-meta {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--slate);
+}
+
+.page-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--s2);
 }
 
-.last-updated {
-  font-size: 12px;
-  color: var(--text-muted);
+.page-body {
+  padding: var(--s6) var(--s8) var(--s12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s8);
+  max-width: 1280px;
 }
 
-.role-badge {
-  background: var(--brand);
-  color: white;
-  border-radius: 999px;
-  padding: 4px 12px;
-  font-size: 12px;
-  text-transform: uppercase;
-}
-
-.metrics-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-.metric-card {
-  background: var(--panel-bg);
-  border: 1px solid var(--border);
-  border-top: 4px solid var(--brand);
-  border-radius: 10px;
-  padding: 16px;
-}
-
-.metric-value {
-  font-size: 28px;
-  font-weight: 700;
-}
-
-.metric-label {
-  color: var(--text-muted);
-  font-size: 13px;
-  margin-top: 4px;
-}
-
-.main-grid {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-@media (max-width: 800px) {
-  .main-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-.panel {
-  background: var(--panel-bg);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 16px;
-}
-
-.panel h2 {
-  margin: 0 0 12px;
-  font-size: 15px;
-  color: var(--text);
-}
-
-.heatmap-container {
-  height: 320px;
-  width: 100%;
-  border-radius: 8px;
-}
-
-.escalation-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.escalation-table th,
-.escalation-table td {
-  text-align: left;
-  padding: 8px;
-  border-bottom: 1px solid var(--border);
+.back-link {
+  align-self: flex-start;
   font-size: 13px;
 }
 
-.row-escalated {
-  background: rgba(220, 38, 38, 0.06);
-}
+/* ── Stat strip ──────────────────────────────────────────────────────── */
 
-.badge-escalated {
-  margin-left: 8px;
-  background: var(--danger);
-  color: white;
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  vertical-align: middle;
-}
-
-.empty-state {
-  color: var(--text-muted);
-  padding: 12px 0;
-}
-
-.subtitle {
-  color: var(--text-muted);
-  margin: 4px 0 0;
-  font-size: 13px;
-}
-
-select {
-  font: inherit;
-  padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--panel-bg);
-  color: var(--text);
-}
-
-/* --- Charts grid --- */
-.charts-grid {
+.stat-strip {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 16px;
-  margin-bottom: 24px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 
-@media (max-width: 900px) {
-  .charts-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-.dashboard-page > .panel {
-  margin-bottom: 24px;
-}
-
-.dashboard-page > .panel:last-child {
-  margin-bottom: 0;
-}
-
-.donut-wrap {
+.stat {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--s4) var(--s4) var(--s4);
+  border-left: 1px solid var(--hairline);
 }
 
-/* --- Roster / sortable tables --- */
-.roster-filters {
+.stat:first-child {
+  border-left: none;
+}
+
+.stat-value {
+  font-size: 30px;
+  line-height: 1.05;
+  color: var(--ink);
+}
+
+.stat-value.tone-high {
+  color: var(--risk-high);
+}
+
+.stat-value.tone-medium {
+  color: var(--risk-medium);
+}
+
+.stat-label {
+  font-size: 13px;
+  color: var(--slate);
+  font-weight: 500;
+}
+
+.stat-note {
+  font-size: 11.5px;
+  color: var(--slate);
+}
+
+/* ── Sections ────────────────────────────────────────────────────────── */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  min-width: 0;
+}
+
+.section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s4);
+  flex-wrap: wrap;
+  padding-bottom: var(--s2);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.section-sub {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--slate);
+  max-width: 68ch;
+}
+
+.section-aside {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 14px;
+  gap: var(--s2);
   flex-wrap: wrap;
 }
 
-.roster-search {
-  min-width: 220px;
+/* Exactly two columns, not auto-fit. With four charts, auto-fit packs
+   three across on a wide screen and strands the fourth on a row of its
+   own next to a large empty rectangle. A fixed pair keeps them as a 2x2
+   block at every desk width and gives each chart room to be read. */
+.section-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s4);
 }
 
-.roster-count {
-  color: var(--text-muted);
-  font-size: 12px;
-  margin-left: auto;
+@media (max-width: 1100px) {
+  .section-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
-.panel-header-row {
+/* ── Status list + rows ──────────────────────────────────────────────── */
+
+.status-list {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.status-row {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
+  align-items: stretch;
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-top: 1px solid var(--hairline);
+  border-radius: 0;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  transition: background-color var(--fast) var(--ease);
 }
 
-.panel-header-row h2 {
-  margin: 0;
+.status-row:first-child {
+  border-top: none;
+}
+
+.status-row.is-clickable {
+  cursor: pointer;
+}
+
+.status-row.is-clickable:hover {
+  background: var(--paper);
+}
+
+.status-rail {
+  flex: 0 0 var(--rail);
+  background: var(--risk-low);
+}
+
+.status-row.tone-high .status-rail {
+  background: var(--risk-high);
+}
+
+.status-row.tone-medium .status-rail {
+  background: var(--risk-medium);
+}
+
+.status-row.tone-human .status-rail {
+  background: var(--indigo);
+}
+
+.status-row-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+}
+
+/* ── Severity as a word, not a filled chip ───────────────────────────── */
+
+.risk-tag {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.risk-tag.tone-high {
+  color: var(--risk-high);
+}
+
+.risk-tag.tone-medium {
+  color: var(--risk-medium);
+}
+
+.risk-tag.tone-low,
+.risk-tag.tone-none {
+  color: var(--slate);
+  font-weight: 500;
+}
+
+.count-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: var(--pill);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.count-tag.tone-high {
+  color: var(--risk-high);
+  background: var(--risk-high-tint);
+  border-color: color-mix(in srgb, var(--risk-high) 24%, transparent);
+}
+
+.count-tag.tone-medium {
+  color: var(--risk-medium);
+  background: var(--risk-medium-tint);
+  border-color: color-mix(in srgb, var(--risk-medium) 24%, transparent);
+}
+
+.count-tag.tone-low,
+.count-tag.tone-muted {
+  color: var(--slate);
+  background: var(--paper);
+  border-color: var(--hairline);
+}
+
+.count-tag.tone-clear {
+  color: var(--forest);
+  background: var(--sage);
+  border-color: color-mix(in srgb, var(--forest) 20%, transparent);
+}
+
+.chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: var(--pill);
+  border: 1px solid var(--hairline);
+  background: var(--paper);
+  color: var(--slate);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.empty {
+  padding: var(--s6) var(--s4);
+  color: var(--slate);
+  font-size: 14px;
+  background: var(--sage);
+  border-radius: var(--radius);
+}
+
+.muted {
+  color: var(--slate);
+}
+
+.avatar {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--sage);
+  color: var(--forest);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.avatar-lg {
+  width: 52px;
+  height: 52px;
+  font-size: 18px;
+}
+
+/* ── Tables ──────────────────────────────────────────────────────────── */
+
+.table-wrap {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 
 .table-scroll {
   overflow-x: auto;
 }
 
-.roster-table {
+table.data {
   width: 100%;
   border-collapse: collapse;
+  font-size: 13.5px;
 }
 
-.roster-table th,
-.roster-table td {
+table.data th,
+table.data td {
   text-align: left;
-  padding: 10px 8px;
-  border-bottom: 1px solid var(--border);
-  font-size: 13px;
+  padding: var(--s3) var(--s3);
+  border-top: 1px solid var(--hairline);
   white-space: nowrap;
+}
+
+table.data thead th {
+  border-top: none;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--paper);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--slate);
+  position: sticky;
+  top: 0;
+}
+
+/* Figures right-align and go tabular so columns compare at a glance. */
+table.data td.n,
+table.data th.n {
+  text-align: right;
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+table.data th.n {
+  font-family: var(--font-ui);
+  font-weight: 600;
+}
+
+table.data tbody tr.is-clickable {
+  cursor: pointer;
+  transition: background-color var(--fast) var(--ease);
+}
+
+table.data tbody tr.is-clickable:hover {
+  background: var(--paper);
+}
+
+/* The rail, as a table cell. Same motif, same meaning. */
+table.data td.rail-cell {
+  width: var(--rail);
+  padding: 0;
+  background-clip: padding-box;
+}
+
+td.rail-cell.tone-high {
+  background: var(--risk-high);
+}
+
+td.rail-cell.tone-medium {
+  background: var(--risk-medium);
+}
+
+td.rail-cell.tone-low {
+  background: var(--risk-low);
+}
+
+td.rail-cell.tone-none {
+  background: var(--hairline);
+}
+
+/* Indigo in a table rail means the same thing it means everywhere else:
+   a person decided this. */
+td.rail-cell.tone-human {
+  background: var(--indigo);
 }
 
 .sortable-th {
   cursor: pointer;
   user-select: none;
-  color: var(--text-muted);
-  font-weight: 600;
 }
 
 .sortable-th:hover {
-  color: var(--text);
+  color: var(--ink);
 }
 
 .sort-arrow {
-  color: var(--brand);
+  color: var(--forest);
 }
 
-.clickable-row {
-  cursor: pointer;
-}
-
-.clickable-row:hover {
-  background: rgba(31, 111, 74, 0.05);
-}
-
-.worker-cell {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.worker-name {
-  font-weight: 600;
-}
-
-.worker-sub {
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.avatar {
-  flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  background: var(--brand);
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.avatar-lg {
-  width: 56px;
-  height: 56px;
-  font-size: 18px;
-}
-
-.pill {
-  display: inline-block;
-  min-width: 20px;
-  text-align: center;
-  padding: 2px 8px;
-  border-radius: 999px;
-  color: white;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.pill-high {
-  background: var(--danger);
-}
-
-.pill-medium {
-  background: var(--warning);
-}
-
-.pill-pending {
-  background: var(--warning);
-}
-
-/* --- Escalations --- */
-.patient-cell {
+.cell-stack {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-}
-
-.link {
-  color: var(--brand);
-  cursor: pointer;
-  text-decoration: underline;
-  text-decoration-color: transparent;
-  transition: text-decoration-color 0.15s;
-}
-
-.link:hover {
-  text-decoration-color: var(--brand);
-}
-
-.drivers-cell {
-  max-width: 320px;
+  gap: 1px;
   white-space: normal;
 }
 
-.drivers-preview {
-  color: var(--text-muted);
+.cell-strong {
+  font-weight: 600;
+}
+
+.cell-sub {
   font-size: 12px;
+  color: var(--slate);
+}
+
+.cell-with-avatar {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+/* The one column that wraps: clinical drivers are sentences, and
+   truncating them to a nowrap cell hides the reason the case was
+   flagged, which is the only thing this column is for. */
+table.data td.drivers {
+  white-space: normal;
+  max-width: 340px;
 }
 
 .drivers-list {
   margin: 0;
-  padding-left: 16px;
-  font-size: 12px;
+  padding-left: var(--s4);
+  font-size: 12.5px;
 }
 
-.drivers-list li {
-  margin-bottom: 2px;
+.drivers-list li + li {
+  margin-top: 2px;
 }
 
-/* --- Detail pages (worker / patient) --- */
-.back-link {
-  background: none;
-  color: var(--brand);
-  padding: 0;
-  margin-bottom: 16px;
-  font-size: 13px;
-}
-
-.back-link:hover {
-  background: none;
-  color: var(--brand-dark);
-  text-decoration: underline;
-}
-
-.detail-header {
+.filters {
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-bottom: 24px;
+  gap: var(--s2);
+  flex-wrap: wrap;
 }
 
-.detail-header h1 {
-  margin: 0;
-  font-size: 20px;
+.filters input {
+  font-size: 13.5px;
+  padding: 7px 10px;
 }
 
-/* --- Patient timeline --- */
-.timeline {
+/* Long-hand, not the `padding` shorthand: the shorthand resets the
+   right padding the base rule reserves for the custom dropdown arrow,
+   and the arrow then prints on top of the last character. */
+.filters select {
+  font-size: 13.5px;
+  padding-block: 7px;
+  padding-left: 10px;
+  padding-right: 32px;
+}
+
+.filters .grow {
+  min-width: 220px;
+}
+
+.filter-label {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  font-size: 12px;
+  color: var(--slate);
+}
+
+.result-count {
+  font-size: 12px;
+  color: var(--slate);
+  margin-left: auto;
+}
+
+/* ── Charts ──────────────────────────────────────────────────────────── */
+
+.chart-card {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  padding: var(--s4);
   display: flex;
   flex-direction: column;
-  gap: 0;
-}
-
-.timeline-entry {
-  display: flex;
-  gap: 12px;
-  padding: 12px 4px;
-  border-bottom: 1px solid var(--border);
-  cursor: pointer;
-}
-
-.timeline-entry:last-child {
-  border-bottom: none;
-}
-
-.timeline-entry:hover {
-  background: rgba(31, 111, 74, 0.05);
-}
-
-.timeline-dot {
-  flex: 0 0 auto;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  margin-top: 6px;
-}
-
-.timeline-body {
-  flex: 1;
+  gap: var(--s1);
   min-width: 0;
 }
 
-.timeline-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 4px;
+.chart-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
 }
 
-.timeline-header strong {
-  font-size: 13px;
+.chart-sub {
+  font-size: 12px;
+  color: var(--slate);
+  margin-bottom: var(--s2);
 }
 
-.transcript {
-  color: var(--text-muted);
-  font-size: 13px;
-  font-style: italic;
-  margin: 4px 0;
+/* Recharts' default tooltip is a white box with a 1px grey border and
+   the library's own type. Restyled here so it belongs to this product. */
+.recharts-default-tooltip {
+  border: 1px solid var(--hairline) !important;
+  border-radius: var(--radius-sm) !important;
+  box-shadow: var(--shadow);
+  font-family: var(--font-ui) !important;
+  font-size: 12.5px !important;
+  padding: var(--s2) var(--s3) !important;
 }
 
-.expand-hint {
-  color: var(--text-muted);
+.recharts-tooltip-label {
+  color: var(--slate) !important;
+  font-size: 11.5px !important;
+  margin-bottom: 2px !important;
+}
+
+.recharts-cartesian-axis-tick text {
+  fill: var(--slate);
   font-size: 11px;
 }
 
-.extracted-fields {
-  margin: 8px 0;
-  padding: 10px;
-  background: var(--bg);
-  border-radius: 6px;
+/* A labelled proportion bar, replacing the donut. Three numbers do not
+   need a pie: a single bar shows the split *and* keeps the counts
+   readable, which a donut with a legend never does. */
+.proportion {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.proportion-bar {
+  display: flex;
+  height: 12px;
+  border-radius: var(--pill);
+  overflow: hidden;
+  background: var(--paper);
+}
+
+.proportion-seg {
+  height: 100%;
+}
+
+.proportion-seg.tone-done {
+  background: var(--forest);
+}
+
+.proportion-seg.tone-pending {
+  background: var(--risk-medium);
+}
+
+.proportion-seg.tone-overdue {
+  background: var(--risk-high);
+}
+
+.proportion-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s4);
+}
+
+.proportion-key {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.proportion-key-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  font-size: 12px;
+  color: var(--slate);
+}
+
+.proportion-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.proportion-swatch.tone-done {
+  background: var(--forest);
+}
+
+.proportion-swatch.tone-pending {
+  background: var(--risk-medium);
+}
+
+.proportion-swatch.tone-overdue {
+  background: var(--risk-high);
+}
+
+.proportion-value {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.proportion-pct {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--slate);
+}
+
+/* ── Compliance (FR-08 visit accountability) ─────────────────────────── */
+
+.compliance-worker {
+  border-top: 1px solid var(--hairline);
+}
+
+.compliance-worker:first-child {
+  border-top: none;
+}
+
+.compliance-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  padding: var(--s3) var(--s4);
+  background: var(--surface);
+  border: none;
+  border-radius: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.compliance-head:hover {
+  background: var(--paper);
+}
+
+.caret {
+  color: var(--slate);
+  width: 10px;
+  flex: 0 0 auto;
+  transition: transform var(--fast) var(--ease);
+  font-size: 10px;
+}
+
+.caret.is-open {
+  transform: rotate(90deg);
+}
+
+.compliance-counts {
+  margin-left: auto;
+  display: flex;
+  gap: var(--s1);
+  flex-wrap: wrap;
+}
+
+.compliance-detail {
+  animation: reveal var(--base) var(--ease);
+  border-top: 1px solid var(--hairline);
+  background: var(--paper);
+}
+
+.compliance-clear {
+  padding: var(--s3) var(--s4) var(--s3) 38px;
+  font-size: 13px;
+  color: var(--slate);
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ── Detail pages ────────────────────────────────────────────────────── */
+
+.detail-id {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+
+/* The registration record: labelled rows, including the empty ones. A
+   blank blood pressure is information -- nobody has taken it -- and
+   hiding the row makes the record look complete when it isn't. */
+.record {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  padding: var(--s2) var(--s4);
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 6px 16px;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 0 var(--s6);
+}
+
+.record-row {
+  display: flex;
+  gap: var(--s3);
+  padding: var(--s2) 0;
+  border-top: 1px solid var(--hairline);
+  font-size: 13.5px;
+}
+
+.record-row:first-child {
+  border-top: none;
+}
+
+.record-label {
+  flex: 0 0 44%;
+  color: var(--slate);
+}
+
+.record-value {
+  font-weight: 600;
+  min-width: 0;
+}
+
+.record-value.is-empty {
+  font-weight: 400;
+  color: color-mix(in srgb, var(--slate) 80%, transparent);
+}
+
+/* ── Visit timeline ──────────────────────────────────────────────────── */
+
+.visit {
+  border-top: 1px solid var(--hairline);
+  display: flex;
+  align-items: stretch;
+}
+
+.visit:first-child {
+  border-top: none;
+}
+
+.visit-rail {
+  flex: 0 0 var(--rail);
+  background: var(--risk-low);
+}
+
+.visit.tone-high .visit-rail {
+  background: var(--risk-high);
+}
+
+.visit.tone-medium .visit-rail {
+  background: var(--risk-medium);
+}
+
+.visit-body {
+  flex: 1;
+  min-width: 0;
+  padding: var(--s3) var(--s4);
+}
+
+.visit-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  cursor: pointer;
+}
+
+.visit-when {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+.transcript {
+  margin-top: var(--s1);
+  color: var(--slate);
+  font-size: 13.5px;
+}
+
+.expand-hint {
+  color: var(--slate);
+  font-size: 11.5px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.extracted {
+  margin: var(--s3) 0 0;
+  padding: var(--s3);
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--s2) var(--s4);
 }
 
 .extracted-row {
   display: flex;
   flex-direction: column;
-  font-size: 12px;
+  font-size: 12.5px;
 }
 
 .extracted-row dt {
-  color: var(--text-muted);
+  color: var(--slate);
   text-transform: capitalize;
 }
 
 .extracted-row dd {
   margin: 0;
   font-weight: 600;
+}
+
+/* ── Human judgment: indigo, and only here ───────────────────────────── */
+
+.human-note {
+  margin-top: var(--s2);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--radius-sm);
+  background: var(--indigo-tint);
+  border: 1px solid color-mix(in srgb, var(--indigo) 22%, transparent);
+  font-size: 12.5px;
+}
+
+.human-note strong {
+  color: var(--indigo);
+}
+
+.override-btn {
+  background: none;
+  border: 1px solid var(--hairline);
+  color: var(--indigo);
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: var(--pill);
+  margin-left: auto;
+}
+
+.override-btn:not(:disabled):hover {
+  background: var(--indigo-tint);
+  border-color: color-mix(in srgb, var(--indigo) 35%, transparent);
+  color: var(--indigo);
+}
+
+.override-form {
+  margin-top: var(--s3);
+  padding: var(--s3);
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.override-form label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--slate);
+}
+
+.override-form select,
+.override-form textarea {
+  width: 100%;
+}
+
+.override-form textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
+.override-actions {
+  display: flex;
+  gap: var(--s2);
+  justify-content: flex-end;
+}
+
+.override-actions .btn-submit {
+  background: var(--indigo);
+}
+
+.override-actions .btn-submit:not(:disabled):hover {
+  background: color-mix(in srgb, var(--indigo) 85%, #000);
+}
+
+.notice {
+  padding: var(--s3);
+  border-radius: var(--radius-sm);
+  background: var(--indigo-tint);
+  color: var(--indigo);
+  font-size: 13px;
+}
+
+/* ── Login ───────────────────────────────────────────────────────────── */
+
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--s6);
+  background: var(--paper);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 360px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  padding: var(--s8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s1);
+}
+
+.login-card h1 {
+  font-size: 24px;
+}
+
+.login-card .subtitle {
+  color: var(--slate);
+  font-size: 13.5px;
+  margin-bottom: var(--s3);
+}
+
+.login-card label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--slate);
+}
+
+.login-card .hint {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--slate);
+  margin-top: var(--s2);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--hairline);
+}
+
+.hint-title {
+  display: block;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* ── Admin ───────────────────────────────────────────────────────────── */
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--s3);
+  align-items: end;
+}
+
+.form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--slate);
+}
+
+.panel-form {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  padding: var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+/* ── Narrow screens ──────────────────────────────────────────────────── */
+
+@media (max-width: 960px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .rail {
+    position: static;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--s4);
+    flex-wrap: wrap;
+    border-right: none;
+    border-bottom: 1px solid var(--hairline);
+    padding: var(--s3) var(--s4);
+  }
+
+  .rail-nav {
+    flex-direction: row;
+    gap: var(--s1);
+  }
+
+  .rail-link-hint {
+    display: none;
+  }
+
+  .rail-foot {
+    margin-top: 0;
+    margin-left: auto;
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .rail-scope {
+    display: none;
+  }
+
+  .page-head,
+  .page-body {
+    padding-left: var(--s4);
+    padding-right: var(--s4);
+  }
+}
+
+@media (max-width: 620px) {
+  .rail-foot .rail-user-text {
+    display: none;
+  }
+
+  .stat-strip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .stat {
+    border-left: none;
+    border-top: 1px solid var(--hairline);
+  }
+
+  .stat:nth-child(even) {
+    border-left: 1px solid var(--hairline);
+  }
+
+  .stat:nth-child(-n + 2) {
+    border-top: none;
+  }
 }

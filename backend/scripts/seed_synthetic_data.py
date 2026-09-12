@@ -112,7 +112,12 @@ def seed_random_workers(db, n_workers: int, patients_per_worker: int, months_his
             "SC-PUNE-01" if i < demo_sub_centre_slots else f"SC-{fake.city_suffix().upper()}-{random.randint(1, 20):02d}"
         )
         worker = Worker(
-            name=fake.name(),
+            # ASHA (Accredited Social Health Activist) is a women-only role
+            # under India's National Health Mission -- name_female(), not
+            # name(), so a synthetic ASHA never comes out male. Her patients
+            # (below) are still generated with a mixed name() + a genuine
+            # random gender field, since patients of either sex are real.
+            name=fake.name_female(),
             phone=fake.unique.numerify("9#########"),
             pin_hash=hash_pin("0000"),
             language_pref=random.choice(LANGUAGES),

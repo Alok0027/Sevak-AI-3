@@ -8,7 +8,12 @@ export function AuthProvider({ children }) {
     const token = localStorage.getItem("sevakai_token");
     const role = localStorage.getItem("sevakai_role");
     const workerId = localStorage.getItem("sevakai_worker_id");
-    return token ? { token, role, workerId } : null;
+    // The login response has always carried worker_name; it just wasn't
+    // kept. The shell shows who is signed in, and "BMO" alone doesn't
+    // answer that -- a district has one dashboard and several people
+    // with the login for it.
+    const workerName = localStorage.getItem("sevakai_worker_name");
+    return token ? { token, role, workerId, workerName } : null;
   });
 
   const login = useCallback(async (phone, pin) => {
@@ -16,7 +21,13 @@ export function AuthProvider({ children }) {
     localStorage.setItem("sevakai_token", result.access_token);
     localStorage.setItem("sevakai_role", result.role);
     localStorage.setItem("sevakai_worker_id", result.worker_id);
-    setAuth({ token: result.access_token, role: result.role, workerId: result.worker_id });
+    localStorage.setItem("sevakai_worker_name", result.worker_name ?? "");
+    setAuth({
+      token: result.access_token,
+      role: result.role,
+      workerId: result.worker_id,
+      workerName: result.worker_name ?? "",
+    });
     return result;
   }, []);
 
@@ -24,6 +35,7 @@ export function AuthProvider({ children }) {
     localStorage.removeItem("sevakai_token");
     localStorage.removeItem("sevakai_role");
     localStorage.removeItem("sevakai_worker_id");
+    localStorage.removeItem("sevakai_worker_name");
     setAuth(null);
   }, []);
 

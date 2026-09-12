@@ -1,4 +1,8 @@
-from pydantic import BaseModel, Field, model_validator
+from datetime import datetime
+
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+VALID_RISK_LEVELS = ("HIGH", "MEDIUM", "LOW")
 
 
 class TranscribeRequest(BaseModel):
@@ -31,6 +35,12 @@ class VoiceVisitRequest(BaseModel):
         description="Transcript already reviewed/edited by the ASHA. When set, this exact text "
         "is used instead of re-transcribing audio_base64.",
     )
+    confirmed_extracted: "ExtractedFields | None" = Field(
+        default=None,
+        description="Clinical fields already reviewed/corrected by the ASHA via "
+        "POST /visits/extract. When set, Agent 1 is skipped and these exact values feed "
+        "risk scoring -- a misheard BP corrected here never reaches the classifier.",
+    )
 
     @model_validator(mode="after")
     def _require_audio_or_transcript(self) -> "VoiceVisitRequest":
@@ -49,11 +59,41 @@ class ExtractedFields(BaseModel):
     bp_diastolic: int | None = None
     weight_kg: float | None = None
     temperature_c: float | None = None
+    # Separate readings: the NHM cutoffs differ (fasting >=126 mg/dL vs
+    # random >=200), so a single undifferentiated number can't be scored.
+    blood_sugar_fasting: int | None = None
+    blood_sugar_random: int | None = None
+    # Reported violence or injury, e.g. ["physical violence", "injury
+    # reported"]. Kept apart from social_risk_factors because those nudge
+    # the score while these escalate outright -- an ASHA describing an
+    # assault is reporting an emergency, not a background stressor.
+    violence_or_injury: list[str] = []
     pregnancy_stage: str | None = None
     medication_compliance: str | None = None  # compliant | non_compliant | unknown
     medication_compliance_detail: str | None = None
     social_risk_factors: list[str] = []
     confidence_scores: dict[str, float] = {}
+
+
+class ExtractRequest(BaseModel):
+    """POST /api/v1/visits/extract request body.
+
+    The transcript-review step (FR-01.4) lets the ASHA fix a misheard word;
+    this is the same idea for the structured fields that word becomes. It
+    takes a transcript rather than audio because it runs *after* she has
+    confirmed the text -- re-extracting from the recording could hand back
+    fields that contradict the transcript she just corrected."""
+
+    transcript: str = Field(min_length=1)
+
+
+class ExtractResponse(BaseModel):
+    extracted: ExtractedFields
+
+
+# confirmed_extracted is annotated as a string above because ExtractedFields
+# is defined below it; resolve that now the name exists.
+VoiceVisitRequest.model_rebuild()
 
 
 class RiskDriver(BaseModel):
@@ -71,3 +111,41 @@ class VoiceVisitResponse(BaseModel):
     risk_score: float
     risk_drivers: list[RiskDriver]
     actions_generated: list[dict]
+
+
+class RiskOverrideRequest(BaseModel):
+    """POST /api/v1/visits/{visit_id}/risk-override request body (FR-03.3).
+
+    The reason is mandatory and free-text, not a dropdown -- the point is a
+    human-readable explanation an ANM/BMO reviewing the audit trail can
+    actually understand, not just a category code."""
+
+    new_risk_level: str = Field(description="HIGH, MEDIUM, or LOW")
+    reason: str = Field(min_length=5, max_length=500, description="Why this correction is being made")
+
+    @field_validator("new_risk_level")
+    @classmethod
+    def _valid_risk_level(cls, v: str) -> str:
+        v = v.upper()
+        if v not in VALID_RISK_LEVELS:
+            raise ValueError(f"new_risk_level must be one of {VALID_RISK_LEVELS}")
+        return v
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("reason cannot be blank")
+        return v.strip()
+
+
+class RiskOverrideResponse(BaseModel):
+    visit_id: str
+    patient_id: str
+    previous_risk_level: str | None
+    new_risk_level: str
+    reason: str
+    overridden_by: str  # worker_id
+    overridden_by_name: str
+    overridden_by_role: str  # asha | anm | bmo
+    overridden_at: datetime

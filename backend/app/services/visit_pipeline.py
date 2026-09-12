@@ -18,6 +18,7 @@ from app.schemas.visit import ExtractedFields, RiskDriver, VoiceVisitResponse
 from app.services.audit import record as audit_record
 from app.services.bhashini_client import get_bhashini_client
 from app.services.llm_client import get_llm_client
+from app.services.sms_client import get_sms_client
 from app.services.whatsapp_client import get_whatsapp_client
 
 
@@ -29,6 +30,7 @@ async def run_voice_visit(
     audio_base64: str | None = None,
     language_code: str = "hi",
     confirmed_transcript: str | None = None,
+    confirmed_extracted: ExtractedFields | None = None,
 ) -> VoiceVisitResponse:
     """FR-01.4: pass `confirmed_transcript` to skip re-transcription and run
     the rest of the pipeline on exactly the text the ASHA already reviewed
@@ -44,7 +46,8 @@ async def run_voice_visit(
     bhashini_client = get_bhashini_client(settings)
     llm_client = get_llm_client(settings)
     whatsapp_client = get_whatsapp_client(settings)
-    graph = build_pipeline_graph(bhashini_client, llm_client, whatsapp_client)
+    sms_client = get_sms_client(settings)
+    graph = build_pipeline_graph(bhashini_client, llm_client, whatsapp_client, sms_client)
 
     initial_state = {
         "worker_id": worker_id,
@@ -55,6 +58,8 @@ async def run_voice_visit(
     }
     if confirmed_transcript:
         initial_state["confirmed_transcript"] = confirmed_transcript
+    if confirmed_extracted:
+        initial_state["confirmed_extracted"] = confirmed_extracted
     if audio_base64:
         initial_state["audio_base64"] = audio_base64
 

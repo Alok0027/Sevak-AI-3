@@ -85,3 +85,77 @@ def test_voice_endpoint_requires_audio_or_transcript():
             json={"worker_id": asha["worker_id"], "patient_id": meera["id"], "language_code": "hi"},
         )
         assert resp.status_code == 422
+
+
+# --- field review (one level below transcript review) -------------------
+
+
+def test_extract_endpoint_is_read_only_and_reads_the_confirmed_text():
+    with TestClient(app) as client:
+        asha = _login(client, "9999999999", "1234")
+        headers = {"Authorization": f"Bearer {asha['access_token']}"}
+
+        history_before = client.get(f"/api/v1/workers/{asha['worker_id']}/history", headers=headers)
+        visits_before = history_before.json()["worker"]["total_visits"]
+
+        resp = client.post(
+            "/api/v1/visits/extract",
+            headers=headers,
+            json={"transcript": DEMO_TRANSCRIPT},
+        )
+        assert resp.status_code == 200, resp.text
+        extracted = resp.json()["extracted"]
+        assert extracted["bp_systolic"] == 140
+        assert extracted["bp_diastolic"] == 90
+        assert extracted["medication_compliance"] == "non_compliant"
+
+        history_after = client.get(f"/api/v1/workers/{asha['worker_id']}/history", headers=headers)
+        assert history_after.json()["worker"]["total_visits"] == visits_before
+
+
+def test_corrected_fields_beat_the_transcript_they_came_from():
+    """The point of the review step: a BP the ASHA fixes by hand must be
+    the BP that gets classified. Here the transcript still says the
+    misheard 120/80, and the corrected 170/110 is what has to win --
+    otherwise correcting a value would silently do nothing."""
+    with TestClient(app) as client:
+        asha = _login(client, "9999999999", "1234")
+        headers = {"Authorization": f"Bearer {asha['access_token']}"}
+        patients = client.get(f"/api/v1/patients/{asha['worker_id']}", headers=headers)
+        meera = next(p for p in patients.json()["patients"] if p["name"] == "Meera Patil")
+
+        misheard = "Meera Patil, 28 saal. BP 120 over 80 tha."
+        baseline = client.post(
+            "/api/v1/visits/voice",
+            headers=headers,
+            json={
+                "worker_id": asha["worker_id"],
+                "patient_id": meera["id"],
+                "confirmed_transcript": misheard,
+                "language_code": "hi",
+            },
+        )
+        assert baseline.json()["risk_level"] != "HIGH"
+
+        corrected = client.post(
+            "/api/v1/visits/voice",
+            headers=headers,
+            json={
+                "worker_id": asha["worker_id"],
+                "patient_id": meera["id"],
+                "confirmed_transcript": misheard,
+                "confirmed_extracted": {
+                    "patient_name": "Meera Patil",
+                    "age": 28,
+                    "bp_systolic": 170,
+                    "bp_diastolic": 110,
+                    "medication_compliance": "unknown",
+                    "social_risk_factors": [],
+                },
+                "language_code": "hi",
+            },
+        )
+        assert corrected.status_code == 200, corrected.text
+        body = corrected.json()
+        assert body["extracted"]["bp_systolic"] == 170
+        assert body["risk_level"] == "HIGH"

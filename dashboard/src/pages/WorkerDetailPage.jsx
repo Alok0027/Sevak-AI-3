@@ -2,9 +2,15 @@ import { useEffect, useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { fetchWorkerHistory } from "../api/client";
 import { useSortableData } from "../hooks/useSortableData";
+import AppShell from "../components/AppShell";
+import StatStrip from "../components/StatStrip";
+import { Empty, RiskTag, Section } from "../components/Surface";
 
-const RISK_COLOR = { HIGH: "#dc2626", MEDIUM: "#d97706", LOW: "#16a34a" };
-
+/** One ASHA worker: her figures, then every visit she has recorded.
+ *
+ * The identity block carries her phone number and language because a
+ * supervisor looking at this page is usually about to ring her -- and
+ * which language she works in decides how that call goes. */
 export default function WorkerDetailPage() {
   const { workerId } = useParams();
   const navigate = useNavigate();
@@ -28,103 +34,122 @@ export default function WorkerDetailPage() {
 
   if (error) {
     return (
-      <div className="dashboard-page">
-        <button className="back-link" onClick={() => navigate(-1)}>&larr; Back</button>
+      <AppShell title="Worker">
+        <button className="btn-bare back-link" onClick={() => navigate(-1)}>
+          ← Back
+        </button>
         <p className="error">{error}</p>
-      </div>
+      </AppShell>
     );
   }
   if (!data) {
     return (
-      <div className="dashboard-page">
-        <p>Loading...</p>
-      </div>
+      <AppShell title="Worker" meta="Loading…">
+        <Empty>Loading worker history…</Empty>
+      </AppShell>
     );
   }
 
   const w = data.worker;
+  const initials = w.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+
+  const Th = ({ k, label }) => (
+    <th onClick={() => requestSort(k)} className="sortable-th">
+      {label}
+      {sortKey === k && <span className="sort-arrow">{direction === "asc" ? " ↑" : " ↓"}</span>}
+    </th>
+  );
 
   return (
-    <div className="dashboard-page">
-      <button className="back-link" onClick={() => navigate(-1)}>&larr; Back to roster</button>
-
-      <div className="detail-header">
-        <div className="avatar avatar-lg">
-          {w.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
-        </div>
+    <AppShell
+      title={w.name}
+      meta={[w.phone, w.sub_centre_id || "No sub-centre", w.language_pref.toUpperCase()].join("  ·  ")}
+      actions={
+        <button className="btn-quiet" onClick={() => navigate(-1)}>
+          ← Back
+        </button>
+      }
+    >
+      <div className="detail-id">
+        <span className="avatar avatar-lg">{initials}</span>
         <div>
-          <h1>{w.name}</h1>
-          <p className="subtitle">
-            {w.phone} &middot; {w.sub_centre_id || "No sub-centre"} &middot; {w.language_pref.toUpperCase()}
+          <p className="cell-strong">ASHA worker</p>
+          <p className="muted" style={{ fontSize: 13 }}>
+            {w.last_visit_at
+              ? `Last recorded a visit ${new Date(w.last_visit_at).toLocaleDateString()}`
+              : "Has not recorded a visit yet"}
           </p>
         </div>
       </div>
 
-      <section className="metrics-row">
-        <div className="metric-card" style={{ borderTopColor: "#2563eb" }}>
-          <div className="metric-value">{w.total_patients}</div>
-          <div className="metric-label">Patients Treated</div>
-        </div>
-        <div className="metric-card" style={{ borderTopColor: "#1f6f4a" }}>
-          <div className="metric-value">{w.total_visits}</div>
-          <div className="metric-label">Total Visits</div>
-        </div>
-        <div className="metric-card" style={{ borderTopColor: "#dc2626" }}>
-          <div className="metric-value">{w.high_risk_count}</div>
-          <div className="metric-label">HIGH Risk Flags</div>
-        </div>
-        <div className="metric-card" style={{ borderTopColor: "#d97706" }}>
-          <div className="metric-value">{w.pending_followups}</div>
-          <div className="metric-label">Pending Follow-ups</div>
-        </div>
-      </section>
+      <StatStrip
+        stats={[
+          { label: "Patients treated", value: w.total_patients },
+          { label: "Total visits", value: w.total_visits },
+          {
+            label: "HIGH risk flags",
+            value: w.high_risk_count,
+            tone: w.high_risk_count > 0 ? "high" : null,
+          },
+          {
+            label: "Pending follow-ups",
+            value: w.pending_followups,
+            tone: w.pending_followups > 0 ? "medium" : null,
+          },
+        ]}
+      />
 
-      <section className="panel">
-        <div className="panel-header-row">
-          <h2>Visit History</h2>
+      <Section
+        title="Visit history"
+        sub="Every visit this worker has recorded. Click a row for the patient's full timeline."
+        aside={
           <select value={riskFilter} onChange={(e) => setRiskFilter(e.target.value)}>
             <option value="all">All risk levels</option>
             <option value="HIGH">HIGH only</option>
             <option value="MEDIUM">MEDIUM only</option>
             <option value="LOW">LOW only</option>
           </select>
-        </div>
-        <div className="table-scroll">
-          <table className="roster-table">
-            <thead>
-              <tr>
-                <th className="sortable-th" onClick={() => requestSort("patient_name")}>
-                  Patient{sortKey === "patient_name" && (direction === "asc" ? " ↑" : " ↓")}
-                </th>
-                <th className="sortable-th" onClick={() => requestSort("risk_level")}>
-                  Risk{sortKey === "risk_level" && (direction === "asc" ? " ↑" : " ↓")}
-                </th>
-                <th className="sortable-th" onClick={() => requestSort("created_at")}>
-                  Date{sortKey === "created_at" && (direction === "asc" ? " ↑" : " ↓")}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((v) => (
-                <tr key={v.visit_id} className="clickable-row" onClick={() => navigate(`/patients/${v.patient_id}`)}>
-                  <td>{v.patient_name}</td>
-                  <td>
-                    <span className="pill" style={{ background: RISK_COLOR[v.risk_level] || "#888" }}>
-                      {v.risk_level || "—"}
-                    </span>
-                  </td>
-                  <td>{new Date(v.created_at).toLocaleString()}</td>
-                </tr>
-              ))}
-              {sorted.length === 0 && (
-                <tr>
-                  <td colSpan={3} className="empty-state">No visits recorded.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </div>
+        }
+      >
+        {sorted.length === 0 ? (
+          <Empty>
+            {data.visits.length === 0
+              ? "No visits recorded yet. They appear here as soon as she submits one from the app."
+              : "No visits at this risk level."}
+          </Empty>
+        ) : (
+          <div className="table-wrap">
+            <div className="table-scroll">
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th className="rail-cell" aria-label="Risk" />
+                    <Th k="patient_name" label="Patient" />
+                    <Th k="risk_level" label="Risk" />
+                    <Th k="created_at" label="Recorded" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {sorted.map((v) => (
+                    <tr
+                      key={v.visit_id}
+                      className="is-clickable"
+                      onClick={() => navigate(`/patients/${v.patient_id}`)}
+                    >
+                      <td className={`rail-cell tone-${(v.risk_level || "none").toLowerCase()}`} />
+                      <td className="cell-strong">{v.patient_name}</td>
+                      <td>
+                        <RiskTag level={v.risk_level} />
+                      </td>
+                      <td className="muted">{new Date(v.created_at).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </Section>
+    </AppShell>
   );
 }

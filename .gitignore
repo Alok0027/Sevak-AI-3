@@ -8,16 +8,36 @@ backend/generated_reports/
 # Node
 node_modules/
 dist/
+# Matches .env, and also .env.bak.<ts>, .env.local, .env.production --
+# a bare `.env` rule does not, and a timestamped backup of a real .env is
+# exactly as dangerous as the original.
 .env
+.env.*
 !.env.example
 
 # Flutter
+# android/ and ios/ are SOURCE, not build output -- they hold the app id,
+# the manifest and its RECORD_AUDIO permission, and the signing config.
+# Ignoring them wholesale meant the microphone permission existed on one
+# laptop and nowhere else, and nobody who cloned the repo could build an
+# APK that worked. Only the generated parts are ignored below.
 mobile/.dart_tool/
 mobile/build/
-mobile/android/
-mobile/ios/
+mobile/android/.gradle/
+mobile/android/app/build/
+mobile/android/local.properties
+mobile/android/key.properties
+mobile/android/app/*.jks
+mobile/ios/Pods/
+mobile/ios/.symlinks/
+mobile/ios/Flutter/Flutter.framework
+mobile/ios/Flutter/ephemeral/
 mobile/.flutter-plugins*
 mobile/.packages
 
 # OS
 .DS_Store
+
+# Scratch: transfer tarballs and files retired during development. Not
+# project source; safe to delete whenever.
+_to_delete/

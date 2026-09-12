@@ -56,6 +56,12 @@ class VisitEntry {
   final String? riskLevel;
   final String? transcript;
   final Map<String, dynamic>? extracted;
+  // FR-03.3: risk_level above already reflects a correction if there was
+  // one. These say *that* it was corrected, by whom, and why.
+  final bool riskOverridden;
+  final String? riskOverrideReason;
+  final String? overriddenByName;
+  final String? overriddenByRole;
 
   VisitEntry({
     required this.visitId,
@@ -65,6 +71,10 @@ class VisitEntry {
     required this.riskLevel,
     required this.transcript,
     required this.extracted,
+    this.riskOverridden = false,
+    this.riskOverrideReason,
+    this.overriddenByName,
+    this.overriddenByRole,
   });
 
   factory VisitEntry.fromJson(Map<String, dynamic> json) => VisitEntry(
@@ -75,6 +85,10 @@ class VisitEntry {
         riskLevel: json['risk_level'] as String?,
         transcript: json['transcript'] as String?,
         extracted: json['extracted'] as Map<String, dynamic>?,
+        riskOverridden: json['risk_overridden'] as bool? ?? false,
+        riskOverrideReason: json['risk_override_reason'] as String?,
+        overriddenByName: json['overridden_by_name'] as String?,
+        overriddenByRole: json['overridden_by_role'] as String?,
       );
 }
 
@@ -94,6 +108,13 @@ class WorkerHistory {
 }
 
 /// GET /api/v1/patients/{patient_id}/history response.
+///
+/// Carries the whole registration record, not just the timeline: an ASHA
+/// opening this on a doorstep needs the baseline readings to compare
+/// today's against, and the phone number to call if the patient isn't
+/// home. Every field below is nullable because registration only requires
+/// a name -- the rest gets filled in over time, and the screen says
+/// "not recorded" rather than inventing a value.
 class PatientHistory {
   final String patientId;
   final String patientName;
@@ -101,7 +122,14 @@ class PatientHistory {
   final String workerName;
   final String? village;
   final int? age;
+  final String? gender;
+  final String? phone;
   final String? pregnancyStage;
+  final int? bpSystolic;
+  final int? bpDiastolic;
+  final int? bloodSugarFasting;
+  final int? bloodSugarRandom;
+  final DateTime? registeredAt;
   final List<VisitEntry> visits;
 
   PatientHistory({
@@ -111,9 +139,19 @@ class PatientHistory {
     required this.workerName,
     required this.village,
     required this.age,
+    this.gender,
+    this.phone,
     required this.pregnancyStage,
+    this.bpSystolic,
+    this.bpDiastolic,
+    this.bloodSugarFasting,
+    this.bloodSugarRandom,
+    this.registeredAt,
     required this.visits,
   });
+
+  bool get hasBloodPressure => bpSystolic != null && bpDiastolic != null;
+  bool get hasBloodSugar => bloodSugarFasting != null || bloodSugarRandom != null;
 
   factory PatientHistory.fromJson(Map<String, dynamic> json) => PatientHistory(
         patientId: json['patient_id'] as String,
@@ -122,7 +160,16 @@ class PatientHistory {
         workerName: json['worker_name'] as String,
         village: json['village'] as String?,
         age: json['age'] as int?,
+        gender: json['gender'] as String?,
+        phone: json['phone'] as String?,
         pregnancyStage: json['pregnancy_stage'] as String?,
+        bpSystolic: json['bp_systolic'] as int?,
+        bpDiastolic: json['bp_diastolic'] as int?,
+        bloodSugarFasting: json['blood_sugar_fasting'] as int?,
+        bloodSugarRandom: json['blood_sugar_random'] as int?,
+        registeredAt: json['registered_at'] != null
+            ? DateTime.parse(json['registered_at'] as String)
+            : null,
         visits: (json['visits'] as List)
             .map((v) => VisitEntry.fromJson(v as Map<String, dynamic>))
             .toList(),

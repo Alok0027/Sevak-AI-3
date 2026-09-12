@@ -25,6 +25,11 @@ class PipelineState(TypedDict, total=False):
     # instead of re-running STT, so what she confirmed is exactly what
     # feeds risk scoring, not a possibly-different re-transcription.
     confirmed_transcript: str
+    # Same principle one step further down: when set, the ASHA has reviewed
+    # the extracted clinical fields via POST /visits/extract and corrected
+    # anything misheard, so node_agent1 uses these verbatim. A wrong BP is
+    # worse than a wrong word -- it drives the risk classification directly.
+    confirmed_extracted: ExtractedFields
 
     # Agent 1 output
     transcript: str

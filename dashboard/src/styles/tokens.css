@@ -1,0 +1,102 @@
+/* The design tokens for every SevakAI web surface.
+ *
+ * This file is the web half of a single system: it mirrors
+ * mobile/lib/theme/tokens.dart value for value. When one changes, change
+ * both -- a token that exists on only one platform is how a product ends
+ * up looking like two products that share a logo.
+ *
+ * Pages name tokens, never raw hex and never raw pixel sizes. */
+
+:root {
+  /* ── Colour ──────────────────────────────────────────────────────────
+     Five base values in one temperature. Every neutral carries a green
+     cast, so the brand doesn't float on generic grey. */
+
+  /* Near-black with a green cast. Primary text and headings. */
+  --ink: #10221c;
+
+  /* The brand green, deepened and cooled from the original #1F6F4A,
+     which read yellow and muddied at small sizes. Identity and primary
+     actions only. */
+  --forest: #14624a;
+  /* Pressed/hover state for forest fills only. */
+  --forest-deep: #0e4838;
+
+  /* Pale green-grey. Selected rows and quiet fills. */
+  --sage: #e8efea;
+
+  /* The app background on every surface. */
+  --paper: #f7f9f8;
+
+  /* Muted text, metadata, and -- deliberately -- low risk. */
+  --slate: #5b6b64;
+
+  /* The one accent, and it carries meaning rather than decoration:
+     indigo always marks *a person decided this* -- a risk override, a
+     corrected transcript, an ASHA-edited vital, an audit entry. Forest
+     marks what the system did. Applied strictly, that makes the line
+     between AI output and human judgment readable everywhere without a
+     legend; applied loosely it means nothing, so it appears nowhere
+     else. */
+  --indigo: #2e3a8c;
+
+  --surface: #ffffff;
+  --hairline: #e4e9e6;
+
+  /* ── Risk: instrumentation, not brand ────────────────────────────────
+     Low is grey on purpose. A green badge spends attention on the
+     patient who needs none; in a triage tool "fine" should be visually
+     silent. Amber is darkened to an ochre because the usual #D97706
+     fails AA at label sizes. All three clear 4.5:1 on --surface. */
+
+  --risk-high: #b3261e;
+  --risk-medium: #8a5a00;
+  --risk-low: var(--slate);
+
+  /* Tints for fills behind risk text. Kept faint: the word carries the
+     meaning, the tint only groups. */
+  --risk-high-tint: rgba(179, 38, 30, 0.08);
+  --risk-medium-tint: rgba(138, 90, 0, 0.1);
+  --indigo-tint: rgba(46, 58, 140, 0.07);
+
+  /* ── Spacing (4pt base) ──────────────────────────────────────────── */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s6: 24px;
+  --s8: 32px;
+  --s12: 48px;
+
+  --radius: 10px;
+  --radius-sm: 6px;
+  --pill: 999px;
+
+  /* The leading status bar that runs down every list row, on web and on
+     mobile alike. 3px is the whole motif. */
+  --rail: 3px;
+
+  /* ── Type ────────────────────────────────────────────────────────────
+     Hind for interface, Anek for display and figures. Both from Indian
+     Type Foundry, and Hind covers Latin *and* Devanagari in one family,
+     so a patient's Hindi transcript in the visit timeline is drawn by
+     the same hand at the same optical weight as the English around it.
+
+     Self-hosted via @fontsource (see main.jsx) rather than a CDN link:
+     the dashboard has to render identically on a venue laptop with no
+     internet. */
+  --font-ui: "Hind", system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Anek Latin", "Hind", system-ui, sans-serif;
+
+  /* ── Motion ──────────────────────────────────────────────────────────
+     Restrained on purpose. This is a government health service: motion
+     confirms what happened (a row opened, a button took the click),
+     never decorates. Nothing lifts, nothing floats. */
+  --ease: cubic-bezier(0.2, 0, 0.2, 1);
+  --fast: 120ms;
+  --base: 160ms;
+
+  /* One elevation, used only for things that genuinely sit above the
+     page: the nav rail's edge and open menus. Cards do not get shadows. */
+  --shadow: 0 1px 3px rgba(16, 34, 28, 0.08);
+}

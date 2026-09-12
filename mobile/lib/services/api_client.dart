@@ -4,14 +4,28 @@ import 'package:http/http.dart' as http;
 import '../models/history_models.dart';
 import '../models/patient.dart';
 
-/// Talks to the FastAPI backend (../backend). Point [baseUrl] at your dev
-/// machine's LAN IP when testing on a physical device -- "localhost" only
-/// works from an emulator on the same host.
+/// Talks to the FastAPI backend (../backend).
+///
+/// A physical device reaches the backend over the LAN, so "localhost" is
+/// no use -- it needs the dev machine's IP. That IP is handed out by DHCP
+/// and changes on its own, which meant editing this file every time the
+/// router reassigned it. So the default below is only a default: override
+/// it at launch without touching the source, and without rebuilding a
+/// different binary for each teammate's network:
+///
+///     flutter run --dart-define=SEVAKAI_API=http://192.168.1.42:8000
+///
+/// An Android emulator on the same host uses http://10.0.2.2:8000.
 class ApiClient {
   final String baseUrl;
   String? _token;
 
-  ApiClient({this.baseUrl = 'http://192.168.4.105:8000'});
+  static const _defaultBaseUrl = String.fromEnvironment(
+    'SEVAKAI_API',
+    defaultValue: 'http://192.168.4.106:8000',
+  );
+
+  ApiClient({String? baseUrl}) : baseUrl = baseUrl ?? _defaultBaseUrl;
 
   void setToken(String token) => _token = token;
 
@@ -44,6 +58,10 @@ class ApiClient {
     String? village,
     String? phone,
     String? pregnancyStage,
+    int? bpSystolic,
+    int? bpDiastolic,
+    int? bloodSugarFasting,
+    int? bloodSugarRandom,
   }) async {
     final resp = await http.post(
       Uri.parse('$baseUrl/api/v1/patients'),
@@ -55,6 +73,10 @@ class ApiClient {
         'village': village,
         'phone': phone,
         'pregnancy_stage': pregnancyStage,
+        'bp_systolic': bpSystolic,
+        'bp_diastolic': bpDiastolic,
+        'blood_sugar_fasting': bloodSugarFasting,
+        'blood_sugar_random': bloodSugarRandom,
       }),
     );
     if (resp.statusCode != 201) {
@@ -106,6 +128,23 @@ class ApiClient {
     return (jsonDecode(resp.body) as Map<String, dynamic>)['transcript'] as String;
   }
 
+  /// The same review-before-trust step as [transcribeAudio], one level
+  /// down: pull the clinical fields out of the transcript she just
+  /// confirmed, so a misheard BP can be corrected before it becomes a risk
+  /// classification. Read-only on the backend -- nothing is stored until
+  /// [submitVoiceVisit] is called with the corrected values.
+  Future<Map<String, dynamic>> extractFields({required String transcript}) async {
+    final resp = await http.post(
+      Uri.parse('$baseUrl/api/v1/visits/extract'),
+      headers: _headers,
+      body: jsonEncode({'transcript': transcript}),
+    );
+    if (resp.statusCode != 200) {
+      throw ApiException('Could not read the details: ${_readableError(resp.body)}');
+    }
+    return (jsonDecode(resp.body) as Map<String, dynamic>)['extracted'] as Map<String, dynamic>;
+  }
+
   /// FR-01.1/01.2: run the full 5-agent pipeline. Pass either [audioBase64]
   /// (it gets transcribed server-side) or [confirmedTranscript] -- the text
   /// the ASHA already reviewed via [transcribeAudio] -- in which case that
@@ -118,6 +157,7 @@ class ApiClient {
     required String languageCode,
     String? audioBase64,
     String? confirmedTranscript,
+    Map<String, dynamic>? confirmedExtracted,
   }) async {
     assert(audioBase64 != null || confirmedTranscript != null);
     final resp = await http.post(
@@ -129,6 +169,7 @@ class ApiClient {
         'language_code': languageCode,
         if (audioBase64 != null) 'audio_base64': audioBase64,
         if (confirmedTranscript != null) 'confirmed_transcript': confirmedTranscript,
+        if (confirmedExtracted != null) 'confirmed_extracted': confirmedExtracted,
       }),
     );
     if (resp.statusCode != 200) {
@@ -138,13 +179,24 @@ class ApiClient {
   }
 
   /// FR-07.3: pending follow-up tasks, sorted by urgency by the backend.
-  Future<List<Map<String, dynamic>>> fetchTasks(String workerId) async {
+  ///
+  /// Returns the whole board, not just the flat list: the server also
+  /// buckets each task as overdue / due today / upcoming against the
+  /// deadline Agent 3 set for that patient's risk level, and the home
+  /// screen shows today's work from it. Classifying here instead would
+  /// risk the app and her supervisor's dashboard disagreeing about
+  /// whether a visit was missed.
+  Future<Map<String, dynamic>> fetchTaskBoard(String workerId) async {
     final resp = await http.get(Uri.parse('$baseUrl/api/v1/tasks/$workerId'), headers: _headers);
     if (resp.statusCode != 200) {
       throw ApiException('Failed to load tasks: ${resp.body}');
     }
-    final data = jsonDecode(resp.body) as Map<String, dynamic>;
-    return (data['tasks'] as List).cast<Map<String, dynamic>>();
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
+
+  Future<List<Map<String, dynamic>>> fetchTasks(String workerId) async {
+    final board = await fetchTaskBoard(workerId);
+    return (board['tasks'] as List).cast<Map<String, dynamic>>();
   }
 
   /// Marks a follow-up task done from the app -- this is what lets the
@@ -176,6 +228,46 @@ class ApiClient {
       throw ApiException('Failed to load patient history: ${resp.body}');
     }
     return PatientHistory.fromJson(jsonDecode(resp.body) as Map<String, dynamic>);
+  }
+
+  /// FR-03.3: correct the AI's risk call on a visit with a mandatory
+  /// reason. An ASHA can do this for her own visits only -- the backend
+  /// enforces that (and the wider sub-centre/district rules for ANM/BMO,
+  /// who use this same endpoint from the web dashboard) and returns a 403
+  /// with a plain-language reason if it's not allowed.
+  Future<Map<String, dynamic>> overrideRisk({
+    required String visitId,
+    required String newRiskLevel,
+    required String reason,
+  }) async {
+    final resp = await http.post(
+      Uri.parse('$baseUrl/api/v1/visits/$visitId/risk-override'),
+      headers: _headers,
+      body: jsonEncode({'new_risk_level': newRiskLevel, 'reason': reason}),
+    );
+    if (resp.statusCode != 200) {
+      throw ApiException(_readableError(resp.body));
+    }
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
+
+  /// FastAPI error bodies are JSON ({"detail": "..."} or, for a 422
+  /// validation failure, {"detail": [{"msg": "...", ...}, ...]}) -- pull
+  /// out just the message instead of showing raw JSON in a SnackBar.
+  String _readableError(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map && decoded['detail'] is String) {
+        return decoded['detail'] as String;
+      }
+      if (decoded is Map && decoded['detail'] is List && (decoded['detail'] as List).isNotEmpty) {
+        final first = (decoded['detail'] as List).first;
+        if (first is Map && first['msg'] != null) return first['msg'].toString();
+      }
+    } catch (_) {
+      // Not JSON (or not the shape we expect) -- fall through to raw body.
+    }
+    return body;
   }
 
   /// FR-01.3/FR-07.1: flush the offline queue once connectivity returns.

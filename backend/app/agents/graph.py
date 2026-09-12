@@ -15,6 +15,7 @@ from app.agents import agent4_reporting as agent4
 from app.agents.state import PipelineState
 from app.services.bhashini_client import BhashiniClientBase
 from app.services.llm_client import LLMClientBase
+from app.services.sms_client import SmsClientBase
 from app.services.whatsapp_client import WhatsAppClientBase
 
 
@@ -22,6 +23,7 @@ def build_pipeline_graph(
     bhashini_client: BhashiniClientBase,
     llm_client: LLMClientBase,
     whatsapp_client: WhatsAppClientBase,
+    sms_client: SmsClientBase,
 ):
     graph = StateGraph(PipelineState)
 
@@ -36,11 +38,16 @@ def build_pipeline_graph(
         return {"transcript": transcript}
 
     async def node_agent1(state: PipelineState) -> dict:
-        extracted = agent1.extract(state["transcript"])
+        # Same rule as the transcript above: fields the ASHA has already
+        # reviewed and corrected win over a fresh extraction.
+        confirmed = state.get("confirmed_extracted")
+        if confirmed:
+            return {"extracted": confirmed}
+        extracted = await agent1.extract_with_llm(state["transcript"], llm_client)
         return {"extracted": extracted}
 
     async def node_agent2(state: PipelineState) -> dict:
-        result = agent2.classify(state["extracted"])
+        result = await agent2.classify_with_llm(state["extracted"], llm_client)
         return {
             "risk_level": result.risk_level,
             "risk_score": result.risk_score,
@@ -57,6 +64,7 @@ def build_pipeline_graph(
             patient_phone=state.get("patient_phone"),
             llm_client=llm_client,
             whatsapp_client=whatsapp_client,
+            sms_client=sms_client,
         )
         return {"actions": actions}
 

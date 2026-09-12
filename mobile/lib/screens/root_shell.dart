@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_strings.dart';
+import '../widgets/language_picker.dart';
 import '../services/api_client.dart';
 import '../services/offline_queue.dart';
 import '../services/session.dart';
@@ -30,7 +32,7 @@ class _RootShellState extends State<RootShell> {
   int _pendingCount = 0;
   bool _syncing = false;
 
-  static const _titles = ['Home', 'My Patients', 'Follow-ups'];
+  static const _titleKeys = ['home', 'myPatients', 'followUps'];
 
   @override
   void initState() {
@@ -54,12 +56,16 @@ class _RootShellState extends State<RootShell> {
       if (!mounted) return;
       final synced = result['synced'] as int? ?? 0;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(synced > 0 ? 'Synced $synced visit(s).' : 'Nothing to sync yet.')),
+        SnackBar(
+          content: Text(
+            synced > 0 ? '${tr(context, 'synced')}: $synced' : tr(context, 'nothingToSync'),
+          ),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Sync failed: $e')),
+        SnackBar(content: Text('${tr(context, 'syncFailed')}: $e')),
       );
     } finally {
       if (mounted) setState(() => _syncing = false);
@@ -70,11 +76,17 @@ class _RootShellState extends State<RootShell> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Sign out?'),
-        content: const Text('You will need your phone number and PIN to sign in again.'),
+        title: Text(tr(context, 'signOutQuestion')),
+        content: Text(tr(context, 'signOutBody')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Sign out')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(tr(context, 'cancel')),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(tr(context, 'signOut')),
+          ),
         ],
       ),
     );
@@ -101,10 +113,13 @@ class _RootShellState extends State<RootShell> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(_titles[_index]),
+        title: Text(tr(context, _titleKeys[_index])),
         actions: [
+          const LanguagePicker(),
           IconButton(
-            tooltip: _pendingCount > 0 ? '$_pendingCount visit(s) waiting to sync' : 'All synced',
+            tooltip: _pendingCount > 0
+                ? '$_pendingCount ${tr(context, 'waitingToSync')}'
+                : tr(context, 'allSynced'),
             onPressed: (_pendingCount > 0 && !_syncing) ? _syncNow : null,
             icon: _syncing
                 ? const SizedBox(
@@ -115,7 +130,11 @@ class _RootShellState extends State<RootShell> {
                     child: Icon(_pendingCount > 0 ? Icons.cloud_off : Icons.cloud_done),
                   ),
           ),
-          IconButton(onPressed: _logout, icon: const Icon(Icons.logout), tooltip: 'Sign out'),
+          IconButton(
+            onPressed: _logout,
+            icon: const Icon(Icons.logout),
+            tooltip: tr(context, 'signOut'),
+          ),
         ],
       ),
       body: IndexedStack(index: _index, children: screens),
@@ -125,12 +144,22 @@ class _RootShellState extends State<RootShell> {
           setState(() => _index = i);
           _refreshPending();
         },
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
+        destinations: [
           NavigationDestination(
-            icon: Icon(Icons.people_outline), selectedIcon: Icon(Icons.people), label: 'Patients'),
+            icon: const Icon(Icons.home_outlined),
+            selectedIcon: const Icon(Icons.home),
+            label: tr(context, 'home'),
+          ),
           NavigationDestination(
-            icon: Icon(Icons.checklist_outlined), selectedIcon: Icon(Icons.checklist), label: 'Tasks'),
+            icon: const Icon(Icons.people_outline),
+            selectedIcon: const Icon(Icons.people),
+            label: tr(context, 'myPatients'),
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.checklist_outlined),
+            selectedIcon: const Icon(Icons.checklist),
+            label: tr(context, 'followUps'),
+          ),
         ],
       ),
     );

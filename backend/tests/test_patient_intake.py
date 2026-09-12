@@ -78,3 +78,32 @@ def test_voice_intake_rejects_non_asha():
             json={"audio_base64": audio_b64, "language_code": "hi"},
         )
         assert resp.status_code == 403
+
+
+# --- Devanagari ---------------------------------------------------------
+# The mock STT returns romanized Hinglish; real Bhashini returns Devanagari.
+# Without these the registration form silently stays blank on real speech.
+
+
+def test_devanagari_registration_fills_every_field():
+    fields = extract("सुनीता देवी, 32 साल, गाँव वाघोली, फोन 9876543210, महिला")
+    assert fields.name == "सुनीता देवी"
+    assert fields.age == 32
+    assert fields.village == "वाघोली"
+    assert fields.phone == "9876543210"
+    assert fields.gender == "female"
+
+
+def test_devanagari_name_stops_at_the_sentence_break():
+    """The danda (U+0964) and the Devanagari digits sit inside the same
+    Unicode block as the letters, so a name pattern built on the whole
+    block runs straight through "। उम्र 28 साल" into the age."""
+    fields = extract("मरीज का नाम मीरा पाटिल है। उम्र 28 साल। गाँव शिरूर।")
+    assert fields.name == "मीरा पाटिल"
+    assert fields.age == 28
+    assert fields.village == "शिरूर"
+
+
+def test_label_word_is_not_mistaken_for_the_name():
+    assert extract("नाम रीता है, 45 साल, महिला").name == "रीता"
+    assert extract("naam Rita hai, 45 saal").name == "Rita"

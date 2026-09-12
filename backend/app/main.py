@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import auth, dashboard, escalations, patients, reports, sync, tasks, visits, workers
+from app.api.routes import admin, auth, dashboard, escalations, patients, reports, sync, tasks, visits, workers
 from app.db.session import init_db
 
 
@@ -43,3 +43,4 @@ app.include_router(sync.router)
 app.include_router(escalations.router)
 app.include_router(tasks.router)
 app.include_router(workers.router)
+app.include_router(admin.router)

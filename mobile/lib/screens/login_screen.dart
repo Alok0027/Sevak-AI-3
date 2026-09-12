@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_strings.dart';
+import '../widgets/language_picker.dart';
 import '../services/api_client.dart';
 import '../services/session.dart';
 import 'root_shell.dart';
@@ -46,7 +48,12 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('SevakAI')),
+      appBar: AppBar(
+        title: const Text('SevakAI'),
+        // Before sign-in too: a worker should be able to pick her language
+        // before she has to read anything else.
+        actions: const [LanguagePicker()],
+      ),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -56,34 +63,34 @@ class _LoginScreenState extends State<LoginScreen> {
             children: [
               const Icon(Icons.health_and_safety, size: 56, color: Color(0xFF1F6F4A)),
               const SizedBox(height: 12),
-              const Text(
-                'Sign in',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              Text(
+                tr(context, 'signIn'),
+                style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 4),
               Text(
-                'ASHA worker home-visit companion',
+                tr(context, 'loginSubtitle'),
                 style: TextStyle(color: Colors.grey.shade600),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 24),
               TextField(
                 controller: _phoneController,
-                decoration: const InputDecoration(
-                  labelText: 'Phone',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.phone),
+                decoration: InputDecoration(
+                  labelText: tr(context, 'phone'),
+                  border: const OutlineInputBorder(),
+                  prefixIcon: const Icon(Icons.phone),
                 ),
                 keyboardType: TextInputType.phone,
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: _pinController,
-                decoration: const InputDecoration(
-                  labelText: 'PIN',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.lock_outline),
+                decoration: InputDecoration(
+                  labelText: tr(context, 'pin'),
+                  border: const OutlineInputBorder(),
+                  prefixIcon: const Icon(Icons.lock_outline),
                 ),
                 keyboardType: TextInputType.number,
                 obscureText: true,
@@ -102,13 +109,13 @@ class _LoginScreenState extends State<LoginScreen> {
                         width: 20,
                         height: 20,
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Text('Login'),
+                    : Text(tr(context, 'login')),
               ),
               const SizedBox(height: 16),
-              const Text(
-                'Demo ASHA: 9999999999 / 1234',
+              Text(
+                tr(context, 'demoAsha'),
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey),
+                style: const TextStyle(color: Colors.grey),
               ),
             ],
           ),

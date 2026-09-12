@@ -14,6 +14,13 @@ class PatientCreate(BaseModel):
     village: str | None = None
     phone: str | None = None
     pregnancy_stage: str | None = None
+    # Baseline readings taken at registration. Per-visit measurements live
+    # on the visit record (app.schemas.visit.ExtractedFields) -- these are
+    # the starting point later visits are compared against, not a risk input.
+    bp_systolic: int | None = None
+    bp_diastolic: int | None = None
+    blood_sugar_fasting: int | None = None
+    blood_sugar_random: int | None = None
 
 
 class PatientSummary(BaseModel):
@@ -31,6 +38,31 @@ class PatientListResponse(BaseModel):
     patients: list[PatientSummary]
 
 
+class PatientDirectoryEntry(BaseModel):
+    """One row in the ANM/BMO cross-worker patient directory (FR-08 drill-
+    down) -- unlike PatientSummary, which is one ASHA's own patient list,
+    this spans every ASHA in scope, so it also carries gender (a filter
+    dimension), registration date, and which worker treats her."""
+
+    id: str
+    name: str
+    age: int | None = None
+    gender: str | None = None
+    village: str | None = None
+    pregnancy_stage: str | None = None
+    risk_status: str | None = None  # HIGH | MEDIUM | LOW | None (no visit yet)
+    last_visit: datetime | None = None
+    total_visits: int = 0
+    registered_at: datetime
+    worker_id: str
+    worker_name: str
+    sub_centre_id: str | None = None
+
+
+class PatientDirectoryResponse(BaseModel):
+    patients: list[PatientDirectoryEntry]
+
+
 class PatientVoiceIntakeRequest(BaseModel):
     """FR-07.2 voice-fill: ASHA speaks the new patient's details instead of
     typing them. Same shape as VoiceVisitRequest's audio fields."""
@@ -45,6 +77,14 @@ class ExtractedIntakeFields(BaseModel):
     gender: str | None = None
     village: str | None = None
     phone: str | None = None
+    pregnancy_stage: str | None = None
+    # Fasting and random blood sugar stay separate because the NHM cutoffs
+    # differ (>=126 vs >=200 mg/dL) -- one undifferentiated number can't be
+    # judged against either.
+    bp_systolic: int | None = None
+    bp_diastolic: int | None = None
+    blood_sugar_fasting: int | None = None
+    blood_sugar_random: int | None = None
     confidence_scores: dict[str, float] = Field(default_factory=dict)
 
 

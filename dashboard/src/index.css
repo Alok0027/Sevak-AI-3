@@ -1,57 +1,203 @@
-:root {
-  --brand: #1f6f4a;
-  --brand-dark: #16543a;
-  --bg: #f4f6f5;
-  --panel-bg: #ffffff;
-  --border: #e2e5e3;
-  --text: #1f2320;
-  --text-muted: #667066;
-  --danger: #dc2626;
-  --warning: #d97706;
-  --success: #16a34a;
+@import "./styles/fonts.css";
+@import "./styles/tokens.css";
 
-  font: 15px/1.5 system-ui, "Segoe UI", Roboto, sans-serif;
-  color-scheme: light;
-  color: var(--text);
-  background: var(--bg);
-}
+/* Base layer: the elements, before any component has an opinion.
+ *
+ * Tuned for how this is actually read -- a district officer at a desk,
+ * or a projector in a review meeting. That means real border contrast
+ * rather than the pale greys that look elegant on a designer's screen
+ * and vanish on a beamer, and figures that line up in columns. */
 
 * {
   box-sizing: border-box;
 }
 
+:root {
+  font: 400 15px/1.5 var(--font-ui);
+  color-scheme: light;
+  color: var(--ink);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
-  background: var(--bg);
+  background: var(--paper);
 }
+
+/* Headings are Anek: it is the display face, and using it for headings
+   and figures while Hind carries the running text is the whole
+   typographic idea. Tight tracking at size, because Anek is drawn
+   loose. */
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+h1 {
+  font-size: 26px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+h2 {
+  font-size: 17px;
+  line-height: 1.4;
+}
+
+h3 {
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+p {
+  margin: 0;
+}
+
+/* Every figure in the product is tabular, so a column of numbers sits on
+   one axis and doesn't jitter as it polls. */
+.num {
+  font-family: var(--font-display);
+  font-feature-settings: "tnum" 1;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* ── Controls ────────────────────────────────────────────────────────── */
 
 button {
-  font: inherit;
+  font: 600 14px/1.4 var(--font-ui);
   cursor: pointer;
-  border: none;
-  border-radius: 6px;
-  padding: 8px 16px;
-  background: var(--brand);
-  color: white;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 9px 16px;
+  background: var(--forest);
+  color: #fff;
+  transition:
+    background-color var(--fast) var(--ease),
+    border-color var(--fast) var(--ease),
+    color var(--fast) var(--ease);
 }
 
-button:hover {
-  background: var(--brand-dark);
+button:not(:disabled):hover {
+  background: var(--forest-deep);
 }
 
 button:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
-input {
-  font: inherit;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+/* The quiet button: an outline, not a second filled colour. Two filled
+   buttons side by side make neither one the answer. */
+.btn-quiet {
+  background: var(--surface);
+  border-color: var(--hairline);
+  color: var(--ink);
+}
+
+.btn-quiet:not(:disabled):hover {
+  background: var(--sage);
+  border-color: var(--forest);
+  color: var(--forest);
+}
+
+.btn-bare {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--forest);
+  font-weight: 600;
+}
+
+.btn-bare:not(:disabled):hover {
+  background: none;
+  color: var(--forest-deep);
+  text-decoration: underline;
+}
+
+input,
+select,
+textarea {
+  font: 400 14px/1.5 var(--font-ui);
+  color: var(--ink);
+  padding: 9px 11px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  transition:
+    border-color var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--slate);
+  opacity: 0.75;
+}
+
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: var(--slate);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--forest);
+  box-shadow: 0 0 0 3px rgba(20, 98, 74, 0.14);
+}
+
+/* Native selects lose their arrow the moment you restyle them, so put
+   one back rather than leaving a bare box that doesn't read as a menu. */
+select {
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath fill='none' stroke='%235B6B64' stroke-width='1.6' d='M1 1.5l5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+  padding-right: 32px;
+  cursor: pointer;
+}
+
+/* Keyboard focus must be obvious -- a public-sector tool has to be
+   operable without a mouse. :focus-visible so it never shows on click. */
+:where(button, a, select, input, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--forest);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+a {
+  color: var(--forest);
+  text-decoration-color: color-mix(in srgb, var(--forest) 35%, transparent);
+  text-underline-offset: 2px;
+}
+
+a:hover {
+  text-decoration-color: var(--forest);
 }
 
 .error {
-  color: var(--danger);
+  color: var(--risk-high);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

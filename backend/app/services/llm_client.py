@@ -1,11 +1,12 @@
 """
-Generic chat-completion client used by Agent 3 (referral/WhatsApp drafting)
-and Agent 4 (report narrative). Agent 1 (entity extraction) and Agent 2 (risk
-reasoning) use their own rule-based mock logic in app/agents/ so the demo
-pipeline behaves deterministically without a key -- swap those to call
-LLMClientBase.complete() with a NER / classification prompt once LLM_API_KEY
-is set (see the TODO comments in agent1_voice_comprehension.py and
-agent2_risk_classification.py).
+Generic chat-completion client. Agent 1 (clinical NER), Agent 2 (risk
+classification) and Agent 3 (referral/WhatsApp drafting) each branch on
+`isinstance(llm_client, MockLLMClient)`: LLM_PROVIDER=mock (default) keeps
+the whole pipeline deterministic and offline; LLM_PROVIDER=real sends real
+calls and (Agent 1/2 only) falls back to rule-based logic if the response
+is missing, malformed, or the call fails. Agent 4 (report generation) is
+still pure aggregation over already-structured fields and doesn't need an
+LLM call at all.
 """
 from abc import ABC, abstractmethod
 
@@ -31,7 +32,7 @@ class MockLLMClient(LLMClientBase):
 
 class LLMClient(LLMClientBase):
     """Real OpenAI-compatible chat completion client. TODO before going live:
-    set LLM_API_KEY / LLM_MODEL / LLM_BASE_URL in .env and flip USE_MOCKS=false."""
+    set LLM_API_KEY / LLM_MODEL / LLM_BASE_URL in .env and set LLM_PROVIDER=real."""
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -58,4 +59,4 @@ class LLMClient(LLMClientBase):
 
 
 def get_llm_client(settings: Settings) -> LLMClientBase:
-    return MockLLMClient() if settings.use_mocks else LLMClient(settings)
+    return LLMClient(settings) if settings.llm_provider.lower() == "real" else MockLLMClient()

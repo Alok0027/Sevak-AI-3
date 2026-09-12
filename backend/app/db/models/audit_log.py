@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import String, DateTime
+from sqlalchemy import String, DateTime, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -23,3 +23,6 @@ class AuditLog(Base):
     record_type: Mapped[str] = mapped_column(String, nullable=True)  # e.g. "visit", "risk_flag"
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     ip_address: Mapped[str] = mapped_column(String, nullable=True)
+    # e.g. {"previous_risk_level": "HIGH", "new_risk_level": "MEDIUM", "reason": "..."}
+    # for a risk.override entry -- the human-readable "why", not just "what changed".
+    details: Mapped[str] = mapped_column(Text, nullable=True)

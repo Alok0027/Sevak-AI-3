@@ -8,12 +8,21 @@ see app/services/worker_stats.py.
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import aliased
 
 from app.api.deps import DbSession, get_supervisor_scope, require_roles
 from app.db.models.patient import Patient
+from app.db.models.risk_flag import RiskFlag
 from app.db.models.visit import Visit
+from app.db.models.worker import Worker
 from app.schemas.worker import PatientHistoryEntry, WorkerHistoryResponse, WorkerRosterResponse
+from app.services.audit import record as audit_record
 from app.services.worker_stats import get_worker_stats, list_worker_stats
+
+# Aliased because a visit's own worker (who did the visit) and the worker who
+# overrode its risk level (who might be a different ASHA, or her ANM/BMO)
+# are two different rows in the same table -- one join per role.
+OverridingWorker = aliased(Worker)
 
 router = APIRouter(prefix="/api/v1/workers", tags=["workers"])
 
@@ -54,8 +63,10 @@ def worker_history(
         raise HTTPException(status_code=403, detail="Worker is outside your sub-centre")
 
     rows = (
-        db.query(Visit, Patient)
+        db.query(Visit, Patient, RiskFlag, OverridingWorker)
         .join(Patient, Visit.patient_id == Patient.patient_id)
+        .outerjoin(RiskFlag, RiskFlag.visit_id == Visit.visit_id)
+        .outerjoin(OverridingWorker, OverridingWorker.worker_id == RiskFlag.overridden_by)
         .filter(Visit.worker_id == worker_id)
         .order_by(Visit.created_at.desc())
         .all()
@@ -69,7 +80,23 @@ def worker_history(
             risk_level=v.risk_level,
             transcript=v.transcript,
             extracted=json.loads(v.structured_json) if v.structured_json else None,
+            risk_overridden=bool(rf and rf.overridden_by),
+            risk_override_reason=rf.override_reason if rf else None,
+            overridden_by_name=ow.name if ow else None,
+            overridden_by_role=ow.role if ow else None,
         )
-        for v, p in rows
+        for v, p, rf, ow in rows
     ]
+    if user.worker_id != worker_id:
+        # Only log this as a supervisor-accessed-someone-else's-record event
+        # (NFR-SC4) -- an ASHA pulling her own "my stats" home screen isn't
+        # a data-access event worth an audit row, and logging it would just
+        # flood the trail with routine app usage every time she opens it.
+        audit_record(
+            db,
+            user_id=user.worker_id,
+            action_type="worker.view",
+            record_id=worker_id,
+            record_type="worker",
+        )
     return WorkerHistoryResponse(worker=stats, visits=visits)

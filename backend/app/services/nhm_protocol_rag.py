@@ -26,6 +26,13 @@ HIGH_BP_DIASTOLIC = 90
 ELEVATED_BP_SYSTOLIC = 130
 ELEVATED_BP_DIASTOLIC = 85
 LOW_TEMP_FEVER_C = 38.0
+# Diabetes thresholds, mg/dL. Fasting and random are judged separately --
+# 150 is diabetic-range fasting but unremarkable as a random reading, so
+# scoring one against the other's cutoff would be actively misleading.
+HIGH_FASTING_SUGAR = 126
+ELEVATED_FASTING_SUGAR = 100
+HIGH_RANDOM_SUGAR = 200
+ELEVATED_RANDOM_SUGAR = 140
 
 
 @dataclass
@@ -69,6 +76,65 @@ class NHMProtocolKnowledgeBase:
                 reason="Fever during pregnancy requires prompt clinical evaluation per NHM protocol.",
             ))
             score += 0.3
+
+        if extracted.blood_sugar_fasting is not None:
+            value = extracted.blood_sugar_fasting
+            if value >= HIGH_FASTING_SUGAR:
+                drivers.append(RiskDriver(
+                    observation=f"Fasting blood sugar {value} mg/dL",
+                    reason=(
+                        f"Fasting glucose at or above {HIGH_FASTING_SUGAR} mg/dL meets the "
+                        "diabetes threshold; in pregnancy this needs prompt review for "
+                        "gestational diabetes per NHM protocol."
+                    ),
+                ))
+                score += 0.5
+            elif value >= ELEVATED_FASTING_SUGAR:
+                drivers.append(RiskDriver(
+                    observation=f"Fasting blood sugar {value} mg/dL",
+                    reason=(
+                        f"Fasting glucose {ELEVATED_FASTING_SUGAR}-{HIGH_FASTING_SUGAR - 1} mg/dL is "
+                        "impaired fasting glucose; NHM protocol recommends monitoring."
+                    ),
+                ))
+                score += 0.2
+
+        if extracted.blood_sugar_random is not None:
+            value = extracted.blood_sugar_random
+            if value >= HIGH_RANDOM_SUGAR:
+                drivers.append(RiskDriver(
+                    observation=f"Random blood sugar {value} mg/dL",
+                    reason=(
+                        f"Random glucose at or above {HIGH_RANDOM_SUGAR} mg/dL meets the diabetes "
+                        "threshold and warrants facility referral per NHM protocol."
+                    ),
+                ))
+                score += 0.5
+            elif value >= ELEVATED_RANDOM_SUGAR:
+                drivers.append(RiskDriver(
+                    observation=f"Random blood sugar {value} mg/dL",
+                    reason=(
+                        f"Random glucose {ELEVATED_RANDOM_SUGAR}-{HIGH_RANDOM_SUGAR - 1} mg/dL is "
+                        "above normal; NHM protocol recommends a confirmatory fasting test."
+                    ),
+                ))
+                score += 0.2
+
+        # Reported violence or injury escalates on its own. Unlike a vital
+        # sign there's no "mildly assaulted" band to grade: the ASHA has
+        # been told about or has seen harm, and the response is the same
+        # urgent one whatever the other readings say.
+        if extracted.violence_or_injury:
+            drivers.append(RiskDriver(
+                observation=", ".join(extracted.violence_or_injury).capitalize(),
+                reason=(
+                    "Reported violence or injury is a safety emergency requiring same-day "
+                    "escalation and medical assessment, regardless of other vitals. NHM "
+                    "guidance routes suspected domestic violence to the facility medical "
+                    "officer."
+                ),
+            ))
+            score += 1.0
 
         if extracted.social_risk_factors:
             drivers.append(RiskDriver(
