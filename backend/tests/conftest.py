@@ -28,6 +28,24 @@ os.environ["STT_PROVIDER"] = "mock"
 os.environ["USE_MOCKS"] = "true"
 os.environ["LLM_PROVIDER"] = "mock"
 os.environ["SMS_PROVIDER"] = "mock"
+os.environ["WHATSAPP_PROVIDER"] = "mock"
+
+# A throwaway AES-256 key for the test database, set only if the developer
+# has not supplied one.
+#
+# Without this, a clean clone fails every single test with
+# "ENCRYPTION_KEY is not set" -- 98 errors from one unset variable, before
+# any test logic runs. Patient columns are encrypted at rest (NFR-SC1), so
+# the very first fixture insert needs a key.
+#
+# Hardcoded rather than random so a failing run can be reopened and the
+# rows read; it protects nothing, because the database it encrypts is
+# deleted and recreated on every run. Never falls back to this in
+# production: app/core/encryption.py still raises when the variable is
+# genuinely absent, and this file is only ever imported by pytest.
+os.environ.setdefault(
+    "ENCRYPTION_KEY", "c2V2YWthaS10ZXN0LWtleS1ub3QtZm9yLXJlYWwtZGE="
+)
 
 # Absolute, so it lands next to this file no matter which directory
 # pytest was invoked from.

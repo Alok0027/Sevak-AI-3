@@ -12,3 +12,13 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+
+# --- Reproducibility -------------------------------------------------
+# Flutter's generated ignore list excludes the Gradle wrapper, which
+# defeats the wrapper's entire purpose: it exists so that anyone who
+# clones the repo builds with the *same* pinned Gradle version, without
+# installing Gradle first. Gradle's own documentation says to commit it.
+# Un-ignored here so a clean clone can actually build an APK.
+!gradle-wrapper.jar
+!/gradlew
+!/gradlew.bat
