@@ -59,6 +59,21 @@ export function StatusRow({ tone, onClick, children, className = "" }) {
  * survives a projector and colour-vision deficiency. */
 export function RiskTag({ level }) {
   if (!level) return <span className="risk-tag tone-none">—</span>;
+  // UNASSESSED is not a fourth severity, it is the absence of a reading:
+  // the visit produced nothing the classifier could score. Spelled out
+  // rather than shown as the raw enum, because "UNASSESSED" in a column
+  // of HIGH/MED/LOW reads as a quieter grade than LOW when it is in fact
+  // the one row in the table somebody has to go back to.
+  if (level === "UNASSESSED") {
+    return (
+      <span
+        className="risk-tag tone-unassessed"
+        title="Nothing could be read from this visit — it needs recording again"
+      >
+        NOT ASSESSED
+      </span>
+    );
+  }
   return <span className={`risk-tag tone-${level.toLowerCase()}`}>{level}</span>;
 }
 

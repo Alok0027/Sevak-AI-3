@@ -47,7 +47,13 @@ def build_pipeline_graph(
         return {"extracted": extracted}
 
     async def node_agent2(state: PipelineState) -> dict:
-        result = await agent2.classify_with_llm(state["extracted"], llm_client)
+        # classify_with_rag, not classify_with_llm: the risk judgement is
+        # grounded on retrieved NHM guidance so its drivers can cite the
+        # document they came from. It falls back through classify_with_llm's
+        # old behaviour and then to the thresholds on its own, so switching
+        # RETRIEVAL_PROVIDER=none returns this node to exactly what it did
+        # before retrieval existed.
+        result = await agent2.classify_with_rag(state["extracted"], llm_client)
         return {
             "risk_level": result.risk_level,
             "risk_score": result.risk_score,

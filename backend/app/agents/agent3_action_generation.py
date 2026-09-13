@@ -9,8 +9,13 @@ from app.services.llm_client import LLMClientBase, MockLLMClient
 from app.services.sms_client import MockSmsClient, SmsClientBase
 from app.services.whatsapp_client import WhatsAppClientBase
 
-# FR-04.3: HIGH -> 48h, MEDIUM -> 7d, LOW -> 30d
-FOLLOWUP_DAYS = {"HIGH": 2, "MEDIUM": 7, "LOW": 30}
+# FR-04.3: HIGH -> 48h, MEDIUM -> 7d, LOW -> 30d.
+#
+# UNASSESSED -> 1d, and it is not a risk tier. The visit produced no
+# readable observation, so the outstanding work is redoing the visit, not
+# waiting on a clinical interval. A month would be the LOW default and is
+# the wrong answer for a patient nobody has actually assessed.
+FOLLOWUP_DAYS = {"HIGH": 2, "MEDIUM": 7, "LOW": 30, "UNASSESSED": 1}
 DEFAULT_PHC = "Primary Health Centre"
 
 logger = logging.getLogger(__name__)
@@ -198,8 +203,25 @@ async def generate(
     # refused outright (131047). Sending the LLM text on that channel
     # would have failed for every real patient while passing every test
     # where we messaged the number first.
-    whatsapp_text = await _draft_whatsapp_message(llm_client, patient_name, risk_level, driver_text)
     due_days = FOLLOWUP_DAYS.get(risk_level, 30)
+
+    # Nothing goes to the patient for an unassessed visit. There is no
+    # finding to tell her about, and "your risk status is unknown" is a
+    # message that alarms without informing -- the problem is ours to fix,
+    # not hers to act on. The follow-up task below is the whole response.
+    if risk_level == "UNASSESSED":
+        actions.append({
+            "type": "followup",
+            "content": (
+                f"Re-record visit for {patient_name} -- nothing could be read from the "
+                f"last recording"
+            ),
+            "status": "pending",
+            "due_at": (now + timedelta(days=due_days)).isoformat(),
+        })
+        return actions
+
+    whatsapp_text = await _draft_whatsapp_message(llm_client, patient_name, risk_level, driver_text)
     wa_result = await _attempt(
         lambda: _deliver_whatsapp(
             whatsapp_client, patient_phone or "", patient_name, risk_level, whatsapp_text, due_days

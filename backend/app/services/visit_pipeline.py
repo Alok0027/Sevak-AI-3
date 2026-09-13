@@ -3,6 +3,7 @@ persists Visit / RiskFlag / Action rows and refreshes the running monthly
 HMIS report -- everything POST /api/v1/visits/voice needs (NFR-P1: <30s
 end-to-end, table 17 data flow)."""
 import json
+import logging
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -14,12 +15,15 @@ from app.db.models.action import Action
 from app.db.models.patient import Patient
 from app.db.models.risk_flag import RiskFlag
 from app.db.models.visit import Visit
+from app.agents.agent5_escalation import check_and_escalate, deliver_escalation_alerts
 from app.schemas.visit import ExtractedFields, RiskDriver, VoiceVisitResponse
 from app.services.audit import record as audit_record
 from app.services.bhashini_client import get_bhashini_client
 from app.services.llm_client import get_llm_client
 from app.services.sms_client import get_sms_client
 from app.services.whatsapp_client import get_whatsapp_client
+
+logger = logging.getLogger(__name__)
 
 
 async def run_voice_visit(
@@ -102,6 +106,19 @@ async def run_voice_visit(
         )
 
     db.commit()
+
+    # FR-06: run the 48-hour escalation check here rather than only when a
+    # supervisor opens the dashboard. A patient who has been HIGH and
+    # untouched for two days should not depend on someone happening to look,
+    # and this is the one code path guaranteed to run while anyone in the
+    # district is working. The check is a single indexed query; the send is
+    # wrapped so an unreachable supervisor cannot fail this ASHA's visit.
+    try:
+        escalated = check_and_escalate(db)
+        if escalated:
+            await deliver_escalation_alerts(db, whatsapp_client, sms_client)
+    except Exception:  # noqa: BLE001 -- escalation must never lose a visit
+        logger.exception("escalation check failed after visit %s", visit.visit_id)
     db.refresh(visit)
 
     audit_record(db, user_id=worker_id, action_type="visit.create", record_id=visit.visit_id, record_type="visit")

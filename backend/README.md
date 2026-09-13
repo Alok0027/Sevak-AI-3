@@ -34,7 +34,7 @@ Run the test suite: `python -m pytest`
 | SQLAlchemy models / DB (SQLite dev, Postgres via `DATABASE_URL`) | Real |
 | LangGraph 5-agent wiring (Agents 1-4 synchronous, Agent 5 background) | Real |
 | Agent 1 entity extraction | Real regex/rule-based parser (works offline). Swap point for an LLM call is marked in `app/agents/agent1_voice_comprehension.py`. |
-| Agent 2 NHM risk classification | Real rule-based thresholds standing in for the ChromaDB RAG pipeline. Swap point in `app/services/nhm_protocol_rag.py`. |
+| Agent 2 NHM risk classification | Retrieval over the NHM corpus in `nhm_corpus/` (`app/services/nhm_retrieval.py`), with the thresholds in `nhm_protocol_rag.py` as a floor the retrieved reasoning cannot go below. `RETRIEVAL_PROVIDER=lexical` (default, BM25, no model) \| `chroma` \| `none`. |
 | Agent 3 referral/WhatsApp/follow-up generation | Real logic, template-based text. Swap point for LLM-drafted local-language text in `app/agents/agent3_action_generation.py`. |
 | Agent 4 HMIS/RCH auto-population + PDF | Real, aggregates actual visit rows. |
 | Agent 5 escalation monitor | Real logic; wire `check_and_escalate()` to a scheduler for production (currently also runs inline on every `GET /escalations/pending`). |
@@ -56,7 +56,7 @@ app/
   core/       settings (config.py) and JWT/password hashing (security.py)
   db/         SQLAlchemy models (one file per table, SRS section 6) + session
   schemas/    Pydantic request/response models
-  services/   External integrations (Bhashini/LLM/WhatsApp) + NHM RAG stub + PDF generation
+  services/   External integrations (Bhashini/LLM/WhatsApp) + NHM retrieval + PDF generation
 scripts/
   seed_synthetic_data.py   Faker-based dataset (--full for the SRS-spec 500 workers/5,000 patients)
   demo_pipeline.py         Runs the SRS section 9 demo scenario directly (no HTTP needed)
@@ -78,6 +78,6 @@ role checks server-side (`app/api/deps.py::require_roles`).
 
 ## Next (per SRS section 10 sprint plan)
 
-- Week 2: swap `nhm_protocol_rag.py` for real ChromaDB + >=20 embedded NHM protocol docs.
+- Grow `nhm_corpus/` beyond its six documents; the retriever reads every `.md` there at startup, so adding one needs no code change and no re-index.
 - Week 3: point the Flutter app and React dashboard (see `../mobile`, `../dashboard`) at this API.
 - Week 4: register real Bhashini/LLM/WhatsApp credentials, flip `USE_MOCKS=false`, load-test with `--full` synthetic dataset.

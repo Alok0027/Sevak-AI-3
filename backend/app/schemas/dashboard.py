@@ -84,6 +84,11 @@ class DashboardMetrics(BaseModel):
     hmis_completion_rate: float  # 0.0 - 1.0
 
 
+class Citation(BaseModel):
+    label: str          # "<document title> — <section>"
+    url: str = ""
+
+
 class EscalationItem(BaseModel):
     patient: str
     patient_id: str
@@ -96,6 +101,12 @@ class EscalationItem(BaseModel):
     worker_sub_centre: str | None = None
     visit_id: str
     drivers: list[str] = []
+    # The NHM guideline sections those drivers were grounded on, when
+    # Agent 2 classified with retrieval. Empty for a flag raised by the
+    # threshold engine alone, and for every flag recorded before the
+    # corpus existed -- so the dashboard must treat empty as "no citation
+    # available", never as "unsourced and therefore suspect".
+    citations: list[Citation] = []
 
 
 class DayCount(BaseModel):

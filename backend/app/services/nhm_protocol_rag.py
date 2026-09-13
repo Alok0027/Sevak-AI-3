@@ -1,21 +1,32 @@
 """
-NHM protocol knowledge base for Agent 2 risk classification (FR-03.1, FR-03.2).
+NHM threshold engine for Agent 2 risk classification (FR-03.1, FR-03.2).
 
-This is a rule-based stand-in for the real RAG pipeline the SRS specifies
-(ChromaDB vector store over >=20 NHM protocol documents, section 10 Week 2).
-The rules below encode the same maternal/child-health thresholds a first
-ChromaDB corpus would surface, so Agent 2's *output shape* (risk level +
-explainable drivers) is already correct -- swapping the body of
-`classify` for an embedding search + LLM reasoning call is a contained
-change that doesn't touch any caller.
+The deterministic half of risk classification. Retrieval over the NHM
+corpus lives next door in `nhm_retrieval.py`, and Agent 2 combines them:
+retrieved guidance supplies the reasoning and the citation, these rules
+supply the floor underneath it.
 
-TODO (Week 2, per SRS section 10): replace this module's body with:
-  1. Embed >=20 NHM protocol documents into ChromaDB.
-  2. On classify(), retrieve top-k relevant protocol chunks for the
-     extracted observations.
-  3. Pass chunks + observations to the LLM client for a grounded
-     HIGH/MEDIUM/LOW judgement with cited drivers.
-Keep the function signature identical so agent2 doesn't need to change.
+This module was once described as a stand-in "until the real RAG pipeline
+is built". It is not a stand-in any more, and it is not superseded either.
+It is the part of the system that cannot fail quietly. Retrieval can miss,
+a corpus can be absent, a model can have an off day -- and every one of
+those failures produces a *less* alarming answer. So the rules below run on
+every visit regardless, and the final risk level is the higher of what they
+say and what the retrieved reasoning says. A woman at 160/110 is HIGH even
+if the search returns nothing at all.
+
+The thresholds encoded here are the published NHM figures, and the corpus
+documents they came from are in ../nhm_corpus:
+
+    BP >=140/90            antenatal_care.md (and diastolic >110 as
+                           imminent eclampsia)
+    fasting glucose >=126  gestational_diabetes.md
+    random glucose >=200   gestational_diabetes.md
+    temperature >=38.0C    antenatal_care.md, PHC within 24 hours
+
+Changing a number here without changing the corpus -- or the reverse --
+leaves the system citing one threshold and applying another, which is
+harder to notice than either being wrong on its own.
 """
 from dataclasses import dataclass
 
@@ -35,6 +46,40 @@ HIGH_RANDOM_SUGAR = 200
 ELEVATED_RANDOM_SUGAR = 140
 
 
+# A visit the classifier could not score at all. Distinct from LOW on
+# purpose: LOW is a finding ("I read her vitals and they are normal"),
+# this is the absence of one ("nothing came through"). Collapsing the two
+# is how a failed transcription ends up looking like a healthy patient --
+# the ASHA sees a calm green badge and an assurance that everything is
+# within range, when in fact nothing was measured. A silent failure should
+# read as louder than a normal result, not identical to it.
+UNASSESSED = "UNASSESSED"
+
+
+def has_clinical_signal(extracted: ExtractedFields) -> bool:
+    """Did Agent 1 recover anything this classifier can actually score?
+
+    Only the fields the rules below read count. A patient name and an age
+    are not clinical signal: a transcript that yielded nothing but "Meera,
+    28" tells you who the visit was about and nothing about how she is.
+
+    medication_compliance == "unknown" is treated as absent for the same
+    reason -- it is Agent 1 recording that it could not tell, which is not
+    an observation. "compliant" does count, even though it scores zero:
+    somebody said the iron tablets were being taken, and that is a real
+    negative finding rather than a gap.
+    """
+    return any((
+        extracted.bp_systolic is not None and extracted.bp_diastolic is not None,
+        extracted.temperature_c is not None,
+        extracted.blood_sugar_fasting is not None,
+        extracted.blood_sugar_random is not None,
+        extracted.medication_compliance in ("compliant", "non_compliant"),
+        bool(extracted.violence_or_injury),
+        bool(extracted.social_risk_factors),
+    ))
+
+
 @dataclass
 class RiskResult:
     risk_level: str  # HIGH | MEDIUM | LOW
@@ -44,6 +89,21 @@ class RiskResult:
 
 class NHMProtocolKnowledgeBase:
     def classify(self, extracted: ExtractedFields) -> RiskResult:
+        if not has_clinical_signal(extracted):
+            return RiskResult(
+                risk_level=UNASSESSED,
+                risk_score=0.0,
+                drivers=[RiskDriver(
+                    observation="No clinical observations were recovered from this visit",
+                    reason=(
+                        "Nothing in the recording could be read as a vital sign, a "
+                        "medication answer, or a reported concern, so there is nothing "
+                        "to assess against NHM thresholds. This is not a normal result "
+                        "-- record the visit again, or enter the details by hand."
+                    ),
+                )],
+            )
+
         drivers: list[RiskDriver] = []
         score = 0.0
 
@@ -152,9 +212,11 @@ class NHMProtocolKnowledgeBase:
             level = "LOW"
 
         if not drivers:
+            # Reachable only when has_clinical_signal() was true, so this
+            # really does mean "measured, and normal" rather than "silent".
             drivers.append(RiskDriver(
                 observation="No abnormal findings recorded",
-                reason="All extracted vitals and compliance signals are within normal NHM range.",
+                reason="The observations recovered from this visit are within normal NHM range.",
             ))
 
         return RiskResult(risk_level=level, risk_score=round(score, 2), drivers=drivers)

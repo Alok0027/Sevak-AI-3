@@ -99,6 +99,14 @@ VoiceVisitRequest.model_rebuild()
 class RiskDriver(BaseModel):
     observation: str
     reason: str
+    # Where the reason came from, when it came from the NHM corpus rather
+    # than the hardcoded thresholds. Optional because the deterministic
+    # rules have no retrieved source to point at -- and because every
+    # driver written before retrieval existed is still valid, just
+    # uncited. An absent source means "this is the threshold engine",
+    # never "the citation got lost".
+    source: str | None = None       # "<document title> — <section>"
+    source_url: str | None = None
 
 
 class VoiceVisitResponse(BaseModel):

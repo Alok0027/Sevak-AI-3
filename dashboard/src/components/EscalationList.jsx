@@ -93,11 +93,32 @@ export default function EscalationList({ escalations, showSubCentre }) {
                   <td className="drivers">
                     {isOpen ? (
                       e.drivers.length > 0 ? (
-                        <ul className="drivers-list">
-                          {e.drivers.map((d, i) => (
-                            <li key={i}>{d}</li>
-                          ))}
-                        </ul>
+                        <>
+                          <ul className="drivers-list">
+                            {e.drivers.map((d, i) => (
+                              <li key={i}>{d}</li>
+                            ))}
+                          </ul>
+                          {/* The NHM sections the judgement was grounded on.
+                              Absent for a flag the threshold engine raised on
+                              its own, and for everything recorded before the
+                              corpus existed -- so nothing is rendered rather
+                              than a "no source" label, which would read as a
+                              defect in the row instead of the ordinary case. */}
+                          {e.citations?.length > 0 && (
+                            <ul className="citation-list">
+                              {e.citations.map((c, i) => (
+                                <li key={i}>
+                                  {c.url ? (
+                                    <a href={c.url} target="_blank" rel="noreferrer">{c.label}</a>
+                                  ) : (
+                                    c.label
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </>
                       ) : (
                         <span className="muted">No drivers recorded</span>
                       )

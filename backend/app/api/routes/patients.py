@@ -23,6 +23,7 @@ from app.schemas.patient import (
 )
 from app.schemas.worker import PatientHistoryEntry, PatientHistoryResponse
 from app.services import patient_intake
+from app.services.llm_client import get_llm_client
 from app.services.audit import record as audit_record
 from app.services.bhashini_client import get_bhashini_client
 
@@ -46,7 +47,9 @@ async def voice_intake(
     settings = get_settings()
     stt_client = get_bhashini_client(settings)
     transcript = await stt_client.transcribe(payload.audio_base64, payload.language_code)
-    extracted = patient_intake.extract(transcript)
+    # Parser first, model only for what it could not read -- see
+    # patient_intake.extract_with_llm. Registration stays usable offline.
+    extracted = await patient_intake.extract_with_llm(transcript, get_llm_client(settings))
     return PatientVoiceIntakeResponse(transcript=transcript, extracted=extracted)
 
 

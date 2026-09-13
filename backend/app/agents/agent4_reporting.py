@@ -44,6 +44,11 @@ def regenerate_monthly_report(db: Session, worker_id: str, month: int, year: int
     high_risk = sum(1 for v in visits if v.risk_level == "HIGH")
     medium_risk = sum(1 for v in visits if v.risk_level == "MEDIUM")
     low_risk = sum(1 for v in visits if v.risk_level == "LOW")
+    # Counted, not folded into low_risk. An HMIS return where the three
+    # tiers do not add up to total_visits is a question somebody asks;
+    # one where unassessed visits were quietly filed as LOW is a claim
+    # that patients were assessed and found well when they were not.
+    unassessed = sum(1 for v in visits if v.risk_level == "UNASSESSED")
 
     anc_visits = 0
     rch_entries = 0
@@ -68,6 +73,7 @@ def regenerate_monthly_report(db: Session, worker_id: str, month: int, year: int
         "high_risk_cases": high_risk,
         "medium_risk_cases": medium_risk,
         "low_risk_cases": low_risk,
+        "unassessed_visits": unassessed,
         "medication_non_compliance_cases": non_compliance_count,
         "report_generated_at": datetime.now(timezone.utc).isoformat(),
     }

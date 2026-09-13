@@ -18,9 +18,20 @@ app.schemas.patient.PatientCreate needs, plus a baseline BP/blood sugar,
 and is deliberately separate from agent1 so clinical-visit extraction and
 patient-registration extraction can evolve independently.
 
-TODO (real mode): once LLM_API_KEY is set, swap extract()'s body for an
-LLM call the same way agent1's docstring describes -- keep this function's
-signature so nothing downstream needs to change.
+`extract()` stays rule-based, and that is not a placeholder for an LLM
+call. Registering a patient is on the offline path (FR-07): an ASHA
+standing in a house with no signal must still be able to speak a name and
+save it. An API call here would break exactly the situation this app
+exists for, and the fields it recovers -- a name, an age, a village -- are
+structured enough that a parser is more predictable than a model.
+
+What it is not good at is phrasing it was not built for. Measured against
+six realistic utterances it read three perfectly, including Devanagari with
+the phone number spoken digit by digit, and on the other three it missed an
+age given as "umar 24" (no unit word), a village named as "Baramati gaon
+se" (anchor used as a suffix), and everything in "twenty six saal ki"
+(an English number word). `extract_with_llm()` below covers that gap
+without giving up the offline path.
 
 Every extracted field is a *suggestion*: the mobile app always shows it in
 an editable form before the ASHA taps Save (FR-01.4-style review step), so
@@ -172,4 +183,62 @@ def extract(transcript: str) -> ExtractedIntakeFields:
             confidence["name"] = 0.7
 
     fields.confidence_scores = confidence
+    return fields
+
+
+async def extract_with_llm(transcript: str, llm_client) -> ExtractedIntakeFields:
+    """The parser first; a model only for what it could not read.
+
+    Deliberately not "ask the LLM, fall back to the parser". The parser is
+    deterministic, instant and works with no signal, and on the transcript
+    shapes it was built for it is already right -- spending a network call
+    to re-derive an answer it has costs latency an ASHA notices and can
+    only introduce disagreement.
+
+    So: parse, and if the essentials came back, stop. Only a transcript the
+    parser could not read is worth a model, and even then the parser's
+    values win on merge, because it was written against these two specific
+    transcript styles and the model was not.
+
+    Every failure returns the parser's result, including no network at all.
+    The worst case is the behaviour that existed before this function.
+    """
+    import json
+    import logging
+
+    from app.services.llm_client import MockLLMClient
+
+    logger = logging.getLogger(__name__)
+    fields = extract(transcript)
+
+    # The two fields the Add Patient form cannot be saved without. If the
+    # parser found both, it understood the sentence; anything else missing
+    # is a blank the ASHA fills in faster than a round trip.
+    if (fields.name and fields.age) or isinstance(llm_client, MockLLMClient) or llm_client is None:
+        return fields
+
+    try:
+        raw = await llm_client.complete(
+            "Extract patient registration details from an Indian ASHA worker's "
+            "spoken description. The text may be Hindi in Devanagari, romanised "
+            "Hinglish, or English, and numbers may be written as words in any of "
+            "them. Return ONLY a raw JSON object, no markdown fences: "
+            '{"name": str|null, "age": int|null, "gender": "female"|"male"|null, '
+            '"village": str|null, "phone": str|null, "pregnancy_stage": str|null}. '
+            "Use null for anything not stated. Do not translate or transliterate "
+            "a name or a village -- return them in the script they were spoken in, "
+            "because they are copied into a medical record.",
+            transcript,
+        )
+        data = json.loads(raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```"))
+    except Exception:  # noqa: BLE001 -- see docstring
+        logger.warning("intake LLM fallback failed; using the parser's result", exc_info=True)
+        return fields
+
+    for key in ("name", "age", "gender", "village", "phone", "pregnancy_stage"):
+        if getattr(fields, key) is None and data.get(key) not in (None, ""):
+            try:
+                setattr(fields, key, data[key])
+            except Exception:  # noqa: BLE001 -- a bad type for one field
+                continue                          # must not lose the others
     return fields

@@ -115,6 +115,17 @@ class Settings(BaseSettings):
     # production database should do to itself on boot.
     seed_demo_on_start: bool = False
 
+    # Retrieval backend for the NHM protocol corpus (FR-03.1):
+    #   lexical (default) | chroma | none
+    # See app/services/nhm_retrieval.py for why lexical is the default
+    # even though the SRS names ChromaDB.
+    retrieval_provider: str = "lexical"
+    # How many protocol passages to put in front of the LLM. Three fits
+    # comfortably in the prompt and covers the common case of a visit
+    # touching two systems at once (say raised BP and low haemoglobin);
+    # more mostly adds tokens and dilutes the relevant one.
+    retrieval_top_k: int = 3
+
     environment: str = "development"
 
 

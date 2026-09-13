@@ -56,9 +56,8 @@ behind an interface with a mock implementation that runs the full pipeline
 deterministically offline, and a real implementation ready to go the moment
 credentials arrive -- flip `USE_MOCKS=false` in `backend/.env`, nothing else
 changes. See `backend/README.md`'s "what's real vs. mocked" table for the
-complete picture, including the two pieces (NHM protocol RAG, Agent 1's LLM
-extraction) that are real rule-based logic standing in for what SRS section
-10 schedules as Week 2 work.
+complete picture, including what is retrieval-grounded and what is
+deterministic rules.
 
 ## Layout
 
@@ -70,7 +69,6 @@ dashboard/  React (district dashboard) -- see dashboard/README.md
 
 ## Next steps, in SRS sprint-plan order
 
-1. **Week 2**: real ChromaDB + >=20 NHM protocol documents (`backend/app/services/nhm_protocol_rag.py` has the exact swap point and keeps the same function signature).
 2. **Week 2**: register for Bhashini + an LLM API key; flip `USE_MOCKS=false`.
 3. **Week 3**: `flutter create .` in `mobile/`, wire `SyncService.start()` after login, test on a real Android 10+/2GB RAM device (FR-07.4).
 4. **Week 3**: WhatsApp Business API approval (apply Week 1 Day 1 per the SRS risk register -- long lead time); Twilio SMS as the documented fallback.

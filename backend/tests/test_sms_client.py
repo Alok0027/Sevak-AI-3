@@ -134,14 +134,31 @@ def _twilio_capture(monkeypatch, response: httpx.Response) -> list[httpx.Request
 
 
 def _twilio_settings(**overrides) -> Settings:
+    """A Settings built only from these values -- never the developer's .env.
+
+    Settings fills any field you do not pass from .env, so a half-specified
+    one here is half the test machine's live configuration. That made
+    test_whatsapp_sandbox_prefixes_both_numbers pass on a clean checkout
+    and fail for anyone who owns a Twilio number: the test asserts Twilio's
+    shared sandbox sender, and their TWILIO_WHATSAPP_FROM quietly replaced
+    it. Same shape as the bug that had pytest writing into sevakai_dev.db.
+
+    _env_file=None closes the whole class of leak rather than pinning this
+    one field, so the next test that forgets an argument gets the declared
+    default instead of somebody's credentials.
+    """
     defaults = dict(
         twilio_account_sid="AC123",
         twilio_api_key_sid="SK123",
         twilio_api_key_secret="secret",
         twilio_phone_number="+15550001111",
+        # Twilio's shared sandbox sender, the same for every account. The
+        # assertions below are about the "whatsapp:" prefix, not about
+        # whose number it is, so it has to be fixed here to be meaningful.
+        twilio_whatsapp_from="whatsapp:+14155238886",
     )
     defaults.update(overrides)
-    return Settings(**defaults)
+    return Settings(_env_file=None, **defaults)
 
 
 def test_whatsapp_sandbox_prefixes_both_numbers():

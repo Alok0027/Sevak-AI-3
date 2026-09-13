@@ -21,10 +21,20 @@ class RiskBadge extends StatelessWidget {
   static const _low = Color(0xFF15803D);
   static const _unknown = Color(0xFF6B7280);
 
+  // Not a fourth severity. UNASSESSED means the visit produced nothing
+  // the classifier could score -- the recording failed, or nothing in it
+  // was a vital sign. It takes the amber of MEDIUM rather than the grey
+  // of _unknown, because grey reads as "nothing to see" and this is the
+  // one badge on the screen that asks the ASHA to go back and redo
+  // something. It is not red: nobody is in danger as far as we know, and
+  // that is exactly the problem.
+  static const _unassessed = _medium;
+
   Color get _color => switch (riskStatus) {
         'HIGH' => _high,
         'MEDIUM' => _medium,
         'LOW' => _low,
+        'UNASSESSED' => _unassessed,
         _ => _unknown,
       };
 
@@ -32,6 +42,7 @@ class RiskBadge extends StatelessWidget {
         'HIGH' => 'HIGH',
         'MEDIUM' => 'MED',
         'LOW' => 'LOW',
+        'UNASSESSED' => 'RECHECK',
         _ => '—',
       };
 
@@ -51,7 +62,13 @@ class RiskBadge extends StatelessWidget {
     }
 
     return Semantics(
-      label: riskStatus == null ? 'Risk not assessed' : '$riskStatus risk',
+      label: switch (riskStatus) {
+        null => 'Risk not assessed',
+        // Screen readers would otherwise announce "UNASSESSED risk",
+        // which parses as a severity. This is not one.
+        'UNASSESSED' => 'Not assessed, needs recording again',
+        _ => '$riskStatus risk',
+      },
       child: Container(
         constraints: const BoxConstraints(minWidth: 52),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
