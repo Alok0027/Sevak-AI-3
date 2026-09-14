@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 
 import '../l10n/app_strings.dart';
 import '../services/api_client.dart';
+import '../services/refresh_signal.dart';
 import '../theme/tokens.dart';
 import '../widgets/status_group.dart';
 import 'patient_detail_screen.dart';
@@ -19,7 +20,17 @@ class TaskListScreen extends StatefulWidget {
   final ApiClient api;
   final String workerId;
 
-  const TaskListScreen({super.key, required this.api, required this.workerId});
+  /// Pinged by the shell when server state changes or this tab is opened.
+  /// A HIGH visit recorded a minute ago generates the follow-ups that show
+  /// up here, so this list has to reload rather than sit at its login state.
+  final RefreshSignal? refresh;
+
+  const TaskListScreen({
+    super.key,
+    required this.api,
+    required this.workerId,
+    this.refresh,
+  });
 
   @override
   State<TaskListScreen> createState() => _TaskListScreenState();
@@ -33,12 +44,24 @@ class _TaskListScreenState extends State<TaskListScreen> {
   void initState() {
     super.initState();
     _tasksFuture = widget.api.fetchTasks(widget.workerId);
+    widget.refresh?.addListener(_refresh);
+  }
+
+  @override
+  void dispose() {
+    widget.refresh?.removeListener(_refresh);
+    super.dispose();
   }
 
   Future<void> _refresh() async {
+    if (!mounted) return;
     final next = widget.api.fetchTasks(widget.workerId);
     setState(() => _tasksFuture = next);
-    await next;
+    try {
+      await next;
+    } catch (_) {
+      // Shown by the FutureBuilder; see patient_list_screen.dart.
+    }
   }
 
   Future<void> _complete(Map<String, dynamic> task) async {
