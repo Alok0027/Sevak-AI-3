@@ -461,7 +461,7 @@ class _VoicePanel extends StatelessWidget {
           Text(tr(context, 'speakExample'), style: T.caption, textAlign: TextAlign.center),
           const SizedBox(height: T.s4),
           DropdownButtonFormField<String>(
-            value: selected,
+            initialValue: selected,
             isDense: true,
             borderRadius: BorderRadius.circular(T.radius),
             decoration: InputDecoration(labelText: tr(context, 'language'), isDense: true),

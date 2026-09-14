@@ -56,7 +56,11 @@ class _TaskListScreenState extends State<TaskListScreen> {
   Future<void> _refresh() async {
     if (!mounted) return;
     final next = widget.api.fetchTasks(widget.workerId);
-    setState(() => _tasksFuture = next);
+    // Braces, not an arrow body -- see patient_list_screen.dart: an arrow
+    // returns the assigned Future and Flutter asserts on that.
+    setState(() {
+      _tasksFuture = next;
+    });
     try {
       await next;
     } catch (_) {

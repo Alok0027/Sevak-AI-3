@@ -4,6 +4,7 @@ import '../l10n/app_strings.dart';
 import '../widgets/language_picker.dart';
 import '../services/api_client.dart';
 import '../services/session.dart';
+import 'register_screen.dart';
 import 'root_shell.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -111,7 +112,16 @@ class _LoginScreenState extends State<LoginScreen> {
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                     : Text(tr(context, 'login')),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: _loading
+                    ? null
+                    : () => Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => RegisterScreen(api: widget.api)),
+                        ),
+                child: Text(tr(context, 'noAccountYet')),
+              ),
+              const SizedBox(height: 8),
               Text(
                 tr(context, 'demoAsha'),
                 textAlign: TextAlign.center,

@@ -56,7 +56,12 @@ class _PatientListScreenState extends State<PatientListScreen> {
   Future<void> _refresh() async {
     if (!mounted) return;
     final next = widget.api.fetchPatients(widget.workerId);
-    setState(() => _patientsFuture = next);
+    // Braces, not `=> _patientsFuture = next`: an arrow body *returns* the
+    // assigned value, and Flutter asserts when a setState callback returns
+    // a Future ("did you mean to await something in here?").
+    setState(() {
+      _patientsFuture = next;
+    });
     try {
       await next;
     } catch (_) {

@@ -20,8 +20,15 @@ dependencies:
   shared_preferences: ^2.2.3    # JWT + logged-in worker_id persistence
   connectivity_plus: ^6.0.3     # offline/online detection for the sync indicator
   record: ^6.2.1                # microphone recording (5.x pinned an inconsistent record_linux/record_platform_interface pair)
-  intl: ^0.20.3                 # date formatting; ^0.20.3 is what flutter_localizations requires
+  intl: ^0.20.3                 # date formatting for task list. Pinned to
+                                # match flutter_localizations, which ships
+                                # with the SDK and requires this range --
+                                # ^0.19.0 made `flutter pub get` unsolvable
+                                # on a current Flutter.
   google_fonts: ^6.2.1          # Hind + Anek (Indian Type Foundry); see theme/tokens.dart
+  url_launcher: ^6.3.0          # Help screen: tel: and WhatsApp links to her ANM.
+                                # An ASHA stuck at a doorstep rings somebody;
+                                # a support form is not a substitute for that.
 
 dev_dependencies:
   flutter_test:

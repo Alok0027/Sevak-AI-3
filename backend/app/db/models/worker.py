@@ -24,4 +24,28 @@ class Worker(Base):
     language_pref: Mapped[str] = mapped_column(String, default="hi")  # ISO-ish code: hi, mr, ta, te, bn
     sub_centre_id: Mapped[str] = mapped_column(String, nullable=True)
     role: Mapped[str] = mapped_column(String, default="asha")  # asha | anm | bmo | admin
+
+    # pending | active | rejected. Gates login (app/api/routes/auth.py).
+    #
+    # Defaults to "active", which is the opposite of what fail-closed would
+    # suggest, and is deliberate. Every path that builds a Worker today is
+    # a trusted one -- the seeder, and an Admin using the staff panel -- so
+    # defaulting to "pending" would lock every account in an existing
+    # database out the moment this column appeared, including the admin
+    # account needed to unlock them. Self-registration is the one untrusted
+    # path, and it sets "pending" explicitly.
+    #
+    # If you add another way to create a Worker out of something a stranger
+    # typed, set status="pending" on it. The check that actually protects
+    # the system lives in login(), because that is the only door.
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default="active", server_default="active"
+    )
+
+    # Who let her in, and when. Approving an account is a decision a person
+    # made about a stranger's claim to be a health worker; that belongs on
+    # the record itself, not only in the audit log.
+    approved_by: Mapped[str] = mapped_column(String, nullable=True)
+    approved_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))

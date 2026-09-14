@@ -1,6 +1,6 @@
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import get_settings
@@ -69,38 +69,83 @@ def init_db() -> None:
         hmis_report,
         patient,
         risk_flag,
+        support_ticket,
         sync_queue,
         visit,
         worker,
     )
 
     Base.metadata.create_all(bind=engine)
-    _add_missing_sqlite_columns()
+    _add_missing_columns()
 
 
-def _add_missing_sqlite_columns() -> None:
-    """create_all() only creates missing *tables*, never adds a column to a
-    table that already exists -- so a dev.db saved before a model gained a
-    new field is stuck without it. Real deployments use Alembic migrations
-    (see the docstring above); for the SQLite dev/demo DB, patch in columns
-    added after the table already had rows, so an existing local database
-    (yours or anyone else's already-seeded copy) picks them up without
-    deleting real data."""
-    if not DATABASE_URL.startswith("sqlite"):
-        return
-    added_columns = {
-        "audit_log": {"details": "TEXT"},
-        "patients": {
-            "bp_systolic": "INTEGER",
-            "bp_diastolic": "INTEGER",
-            "blood_sugar_fasting": "INTEGER",
-            "blood_sugar_random": "INTEGER",
-        },
-    }
+# Columns added to a model after its table already existed somewhere.
+#
+# Types are written in the SQL both SQLite and Postgres accept, because the
+# same list has to patch a developer's dev.db and a deployed Postgres.
+# TEXT and INTEGER are fine in both; anything needing a dialect-specific
+# type is the point at which this stops being adequate and Alembic starts.
+_ADDED_COLUMNS: dict[str, dict[str, str]] = {
+    "audit_log": {"details": "TEXT"},
+    "patients": {
+        "bp_systolic": "INTEGER",
+        "bp_diastolic": "INTEGER",
+        "blood_sugar_fasting": "INTEGER",
+        "blood_sugar_random": "INTEGER",
+    },
+    # Registration + approval. The DEFAULT matters as much as the column:
+    # it is what every worker row already in the database gets, and without
+    # it every existing account -- including the only admin -- would land
+    # on NULL, fail the "is this account active" check in login(), and lock
+    # the whole deployment out at the exact moment this code shipped.
+    "workers": {
+        "status": "TEXT NOT NULL DEFAULT 'active'",
+        "approved_by": "TEXT",
+        "approved_at": "TIMESTAMP",
+    },
+}
+
+
+def _add_missing_columns() -> None:
+    """Patch in columns added after a table already had rows.
+
+    create_all() creates missing *tables* and never touches an existing
+    one, so a database saved before a model gained a field is stuck without
+    it -- and on a deployed Postgres that means every query naming the new
+    column fails until somebody runs DDL by hand.
+
+    This used to be SQLite-only, which was fine while the only database
+    that mattered was a developer's dev.db. It is not fine now: the
+    deployed Postgres has the same tables, created by the same create_all()
+    on an earlier version of these models, and it needs the same patch.
+
+    Real deployments should use Alembic migrations (see the module
+    docstring). This is the stopgap that keeps a demo deployment upgrading
+    cleanly, and it is deliberately narrow: additive columns only, never a
+    rename, a type change or a drop.
+    """
+    is_sqlite = DATABASE_URL.startswith("sqlite")
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+
     with engine.connect() as conn:
-        for table, columns in added_columns.items():
-            existing = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
-            for column, column_type in columns.items():
-                if column not in existing:
-                    conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
+        for table, columns in _ADDED_COLUMNS.items():
+            if table not in existing_tables:
+                continue  # create_all() just made it, with every column
+            existing = {c["name"] for c in inspector.get_columns(table)}
+            for column, ddl in columns.items():
+                if column in existing:
+                    continue
+                # SQLite has no ADD COLUMN IF NOT EXISTS, which is why the
+                # membership check above exists rather than relying on it.
+                conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
         conn.commit()
+
+    # SQLite fills existing rows from the DEFAULT on ADD COLUMN, and so
+    # does Postgres (11+). Older Postgres does not, so make it true either
+    # way rather than depending on the server version a host happens to
+    # give you -- a NULL status is an account that cannot log in.
+    if not is_sqlite:
+        with engine.connect() as conn:
+            conn.exec_driver_sql("UPDATE workers SET status = 'active' WHERE status IS NULL")
+            conn.commit()
