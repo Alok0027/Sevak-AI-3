@@ -49,6 +49,16 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!-- Help screen: the dialler and WhatsApp. iOS refuses to tell an app
+	     whether a scheme can be opened unless it is listed here, so
+	     url_launcher reports failure and "Call your ANM" silently does
+	     nothing. Same shape of quiet failure as the queries block in
+	     android/app/src/main/AndroidManifest.xml. -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>tel</string>
+		<string>whatsapp</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

@@ -197,6 +197,120 @@ def make_visit_vitals() -> dict:
     return _synthetic_vitals()
 
 
+def seed_caseload(db, worker, patients_per_worker: int, months_history: int) -> None:
+    """Give one ASHA a set of patients with real visit history.
+
+    Pulled out of seed_random_workers so the demo account can have one too.
+    It could not before: seed_demo_fixtures gave Sunita a single patient
+    (Meera, deliberately unvisited -- she is the patient the live demo
+    records) and every other patient went to a generated ASHA with a random
+    phone and PIN 0000. So the one login anybody actually uses opened on
+    "1 patient, 0 visits, nothing due today", while 161 patients and 801
+    visits sat in the same database under accounts nobody had the number
+    for. The data was there; the demo could not reach it.
+    """
+    for _ in range(patients_per_worker):
+        is_pregnant = random.random() < 0.35
+        patient = Patient(
+            worker_id=worker.worker_id,
+            name=fake.name(),
+            age=random.randint(18, 45) if is_pregnant else random.randint(1, 70),
+            gender=random.choice(["female", "male"]),
+            village=random.choice(VILLAGES),
+            phone=fake.numerify("9#########"),
+            pregnancy_stage=f"{random.randint(1, 9)} months" if is_pregnant else None,
+        )
+        db.add(patient)
+        db.flush()
+
+        n_visits = random.randint(0, 3 * months_history)
+        for _ in range(n_visits):
+            # Risk is computed, not chosen. Every historical visit runs
+            # through the same classifier a live one does, over vitals
+            # that are actually stored on the visit.
+            #
+            # It used to be `random.choices(RISK_LEVELS, weights=...)`
+            # with structured_json="{}" and an unrelated random
+            # risk_score -- so a HIGH patient had no readings, no
+            # drivers that referred to anything, and a score that could
+            # contradict her own label. The dashboard's risk
+            # distribution was a weight somebody picked rather than an
+            # output of the system, and clicking into a flagged patient
+            # showed nothing behind the flag.
+            vitals = make_visit_vitals()
+            extracted = ExtractedFields(
+                pregnancy_stage=patient.pregnancy_stage,
+                medication_compliance=random.choices(
+                    ["compliant", "non_compliant"], weights=[0.8, 0.2]
+                )[0],
+                **vitals,
+            )
+            result = classify(extracted)
+            risk_level = result.risk_level
+
+            days_ago = random.randint(0, months_history * 30)
+            created_at = datetime.now(timezone.utc) - timedelta(days=days_ago)
+            visit = Visit(
+                patient_id=patient.patient_id,
+                worker_id=worker.worker_id,
+                transcript="[synthetic historical visit -- audio not retained]",
+                structured_json=extracted.model_dump_json(),
+                risk_score=result.risk_score,
+                risk_level=risk_level,
+                created_at=created_at,
+                synced_at=created_at,
+            )
+            db.add(visit)
+            db.flush()
+
+            db.add(
+                RiskFlag(
+                    visit_id=visit.visit_id,
+                    risk_level=risk_level,
+                    drivers_json=json.dumps([d.model_dump() for d in result.drivers]),
+                    created_at=created_at,
+                )
+            )
+
+            # FR-04.3: every visit gets a follow-up task, due date by risk
+            # level. Older ones are randomly resolved so the dashboard's
+            # done/pending/overdue split has all three buckets populated.
+            due_days = AGENT3_FOLLOWUP_DAYS.get(risk_level, 30)
+            due_at = created_at + timedelta(days=due_days)
+            is_resolved = random.random() < (0.75 if days_ago > due_days else 0.2)
+            db.add(
+                Action(
+                    visit_id=visit.visit_id,
+                    type="followup",
+                    content=f"Follow-up visit for {patient.name} ({risk_level} risk)",
+                    status="done" if is_resolved else "pending",
+                    due_at=due_at,
+                    created_at=created_at,
+                )
+            )
+
+
+def seed_demo_worker_caseload(db, patients_per_worker: int, months_history: int) -> None:
+    """The demo ASHA's own caseload, so her login opens on a real day.
+
+    Skipped if she already has visits, because this script appends: running
+    it twice must not give her sixteen patients and double the history.
+    Meera is left alone either way -- she stays the unvisited patient the
+    demo script records live.
+    """
+    worker = db.query(Worker).filter(Worker.phone == DEMO_WORKER_PHONE).first()
+    if worker is None:
+        return
+    # Patients, not visits: Meera is the only patient seed_demo_fixtures
+    # gives her, and the demo records a visit *for Meera*. Guarding on
+    # visits would mean one run of the demo script permanently blocks the
+    # caseload from ever being seeded.
+    if db.query(Patient).filter(Patient.worker_id == worker.worker_id).count() > 1:
+        return
+    seed_caseload(db, worker, patients_per_worker, months_history)
+    db.commit()
+
+
 def seed_random_workers(db, n_workers: int, patients_per_worker: int, months_history: int) -> None:
     # Put a handful of the random workers in the demo ANM's sub-centre
     # (SC-PUNE-01) so her roster/dashboard has more than the single demo
@@ -233,86 +347,9 @@ def seed_random_workers(db, n_workers: int, patients_per_worker: int, months_his
         db.add(worker)
         db.flush()
 
-        for _ in range(patients_per_worker):
-            is_pregnant = random.random() < 0.35
-            patient = Patient(
-                worker_id=worker.worker_id,
-                name=fake.name(),
-                age=random.randint(18, 45) if is_pregnant else random.randint(1, 70),
-                gender=random.choice(["female", "male"]),
-                village=random.choice(VILLAGES),
-                phone=fake.numerify("9#########"),
-                pregnancy_stage=f"{random.randint(1, 9)} months" if is_pregnant else None,
-            )
-            db.add(patient)
-            db.flush()
-
-            n_visits = random.randint(0, 3 * months_history)
-            for _ in range(n_visits):
-                # Risk is computed, not chosen. Every historical visit runs
-                # through the same classifier a live one does, over vitals
-                # that are actually stored on the visit.
-                #
-                # It used to be `random.choices(RISK_LEVELS, weights=...)`
-                # with structured_json="{}" and an unrelated random
-                # risk_score -- so a HIGH patient had no readings, no
-                # drivers that referred to anything, and a score that could
-                # contradict her own label. The dashboard's risk
-                # distribution was a weight somebody picked rather than an
-                # output of the system, and clicking into a flagged patient
-                # showed nothing behind the flag.
-                vitals = make_visit_vitals()
-                extracted = ExtractedFields(
-                    pregnancy_stage=patient.pregnancy_stage,
-                    medication_compliance=random.choices(
-                        ["compliant", "non_compliant"], weights=[0.8, 0.2]
-                    )[0],
-                    **vitals,
-                )
-                result = classify(extracted)
-                risk_level = result.risk_level
-
-                days_ago = random.randint(0, months_history * 30)
-                created_at = datetime.now(timezone.utc) - timedelta(days=days_ago)
-                visit = Visit(
-                    patient_id=patient.patient_id,
-                    worker_id=worker.worker_id,
-                    transcript="[synthetic historical visit -- audio not retained]",
-                    structured_json=extracted.model_dump_json(),
-                    risk_score=result.risk_score,
-                    risk_level=risk_level,
-                    created_at=created_at,
-                    synced_at=created_at,
-                )
-                db.add(visit)
-                db.flush()
-
-                db.add(
-                    RiskFlag(
-                        visit_id=visit.visit_id,
-                        risk_level=risk_level,
-                        drivers_json=json.dumps([d.model_dump() for d in result.drivers]),
-                        created_at=created_at,
-                    )
-                )
-
-                # FR-04.3: every visit gets a follow-up task, due date by risk
-                # level. Older ones are randomly resolved so the dashboard's
-                # done/pending/overdue split has all three buckets populated.
-                due_days = AGENT3_FOLLOWUP_DAYS.get(risk_level, 30)
-                due_at = created_at + timedelta(days=due_days)
-                is_resolved = random.random() < (0.75 if days_ago > due_days else 0.2)
-                db.add(
-                    Action(
-                        visit_id=visit.visit_id,
-                        type="followup",
-                        content=f"Follow-up visit for {patient.name} ({risk_level} risk)",
-                        status="done" if is_resolved else "pending",
-                        due_at=due_at,
-                        created_at=created_at,
-                    )
-                )
+        seed_caseload(db, worker, patients_per_worker, months_history)
         db.commit()
+
 
 
 def main() -> None:
@@ -341,6 +378,10 @@ def main() -> None:
                   f"seeding ADDS to them. Delete the .db file first for a clean set.",
                   flush=True)
         seed_demo_fixtures(db)
+        # The demo account gets a caseload of its own. Without this the one
+        # login everybody uses opens on an empty day while all the seeded
+        # data sits under generated ASHAs nobody has the phone number for.
+        seed_demo_worker_caseload(db, patients_per_worker=patients_per_worker, months_history=args.months)
         seed_random_workers(db, n_workers=n_workers, patients_per_worker=patients_per_worker, months_history=args.months)
         total_workers = db.query(Worker).count()
         total_patients = db.query(Patient).count()

@@ -565,7 +565,7 @@ class _OverrideForm extends StatelessWidget {
           Text(tr(context, 'correctRiskLevelTo'), style: T.caption),
           const SizedBox(height: T.s1),
           DropdownButtonFormField<String>(
-            value: overrideLevel,
+            initialValue: overrideLevel,
             isDense: true,
             borderRadius: BorderRadius.circular(T.radius),
             decoration: const InputDecoration(isDense: true),

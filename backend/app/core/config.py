@@ -23,7 +23,13 @@ class Settings(BaseSettings):
     # Auth
     jwt_secret: str = "change-me-before-any-real-deployment"
     jwt_algorithm: str = "HS256"
-    access_token_expire_minutes: int = 480
+    access_token_expire_minutes: int = 480       # 8 hours -- supervisors on a
+                                                 # dashboard, often a shared PC
+    field_token_expire_minutes: int = 43200      # 30 days -- an ASHA's own
+                                                 # phone, which spends days out
+                                                 # of signal. See
+                                                 # security.token_lifetime_minutes
+                                                 # for why these differ.
 
     # NFR-SC1: AES-256 key (urlsafe-base64, 32 raw bytes) for encrypting
     # patient data at rest -- see app/core/encryption.py. Generate one with

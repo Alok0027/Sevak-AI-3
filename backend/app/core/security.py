@@ -21,9 +21,42 @@ def verify_pin(pin: str, hashed: str) -> bool:
     return pwd_context.verify(pin, hashed)
 
 
+# Roles that work in the field, on their own phone, out of signal.
+FIELD_ROLES = frozenset({"asha"})
+
+
+def token_lifetime_minutes(role: str) -> int:
+    """How long a token lasts, by who is holding it.
+
+    A supervisor signs in to a web dashboard, often on a shared computer, so
+    a short session is the safer default and costs her nothing -- she is
+    online by definition.
+
+    An ASHA is the opposite case. FR-07.1 says the app works fully offline
+    and FR-01.3 says queued visits sync when signal returns; a single
+    eight-hour window made both untrue. A worker who spent a day in a
+    village with no bars came back to a dead token, and because
+    /sync/batch needs it, her queued visits could not be pushed at all --
+    the app looked like it had eaten them. She had to sign out and back in
+    to recover, which is not something the offline story should ever
+    require, and not something she would think to try.
+
+    The trade-off is honest: a long-lived token on a lost phone is a long
+    window of access. The app re-issues it on every online start (see
+    POST /auth/refresh), so the clock resets constantly in practice and
+    only a phone that is lost *and* offline holds a stale one.
+    """
+    settings = get_settings()
+    return (
+        settings.field_token_expire_minutes
+        if role in FIELD_ROLES
+        else settings.access_token_expire_minutes
+    )
+
+
 def create_access_token(subject: str, role: str, extra_claims: dict[str, Any] | None = None) -> str:
     settings = get_settings()
-    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
+    expire = datetime.now(timezone.utc) + timedelta(minutes=token_lifetime_minutes(role))
     payload: dict[str, Any] = {"sub": subject, "role": role, "exp": expire}
     if extra_claims:
         payload.update(extra_claims)

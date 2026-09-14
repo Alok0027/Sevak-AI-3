@@ -21,10 +21,25 @@ class StaffMember(BaseModel):
     sub_centre_id: str | None
     language_pref: str
     created_at: datetime
+    # pending | active | rejected. Defaulted rather than required so a
+    # caller written before approval existed still validates.
+    status: str = "active"
+    approved_by_name: str | None = None
+    approved_at: datetime | None = None
 
 
 class StaffListResponse(BaseModel):
     staff: list[StaffMember]
+    # So the panel can show "3 waiting" without a second request. A
+    # registration nobody looks at is a health worker who cannot work.
+    pending_count: int = 0
+
+
+class RegistrationDecisionRequest(BaseModel):
+    # Optional on an approval, required by the route on a rejection:
+    # turning somebody away from a health-worker account is a decision the
+    # next admin -- and she, if she rings to ask -- deserves a reason for.
+    reason: str | None = None
 
 
 class StaffCreateRequest(BaseModel):

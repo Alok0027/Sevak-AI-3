@@ -116,11 +116,28 @@ export async function fetchAllPatients({ subCentreId } = {}) {
 // Admin panel (NFR-SC1/SC4 + the 'admin' role finally having somewhere to
 // go): district-wide staff directory across all four roles (the ASHA-only
 // roster above can't show this) and the audit trail viewer.
-export async function fetchStaff({ role } = {}) {
+export async function fetchStaff({ role, status } = {}) {
   const { data } = await client.get("/api/v1/admin/staff", {
-    params: { role: role || undefined },
+    params: { role: role || undefined, status: status || undefined },
   });
-  return data.staff;
+  // The caller wants the rows; the pending count rides along on the object
+  // so the panel can badge the queue without a second request.
+  return Object.assign(data.staff, { pendingCount: data.pending_count ?? 0 });
+}
+
+// A worker who registered in the app is waiting on one of these two calls.
+// Until an admin makes the decision she cannot sign in at all, so this is
+// not an administrative nicety -- it is the last step of her onboarding.
+export async function approveStaff(workerId, reason) {
+  const { data } = await client.post(`/api/v1/admin/staff/${workerId}/approve`, {
+    reason: reason || null,
+  });
+  return data;
+}
+
+export async function rejectStaff(workerId, reason) {
+  const { data } = await client.post(`/api/v1/admin/staff/${workerId}/reject`, { reason });
+  return data;
 }
 
 export async function createStaff(payload) {

@@ -49,5 +49,20 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+
+        <!-- Help screen: the dialler, and WhatsApp via a wa.me link.
+             Android 11 and later hide every other installed app from this
+             one unless it is declared here, and the failure is quiet:
+             url_launcher just reports it could not open the link, so
+             "Call your ANM" does nothing and an ASHA standing at a
+             doorstep concludes the app is broken. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="tel"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
     </queries>
 </manifest>

@@ -216,7 +216,36 @@ class _BootstrapState extends State<_Bootstrap> {
     super.initState();
     // Language first, so the login screen already renders in her
     // language rather than flashing English for a frame.
-    _sessionFuture = appLocale.load().then((_) => Session.restore());
+    _sessionFuture = appLocale.load().then((_) => Session.restore()).then(_renewed);
+  }
+
+  /// Push the token's expiry back on every start that has signal.
+  ///
+  /// A field token is long-lived precisely so a week in a low-signal block
+  /// cannot strand her queued visits. This is what stops that from also
+  /// meaning a token nobody has rotated in months: in normal use the clock
+  /// resets every time she opens the app, so the only stale token in
+  /// existence belongs to a phone that is lost *and* switched off.
+  ///
+  /// Silent on failure, deliberately. Offline -- or with a free-tier server
+  /// still waking up -- the token she already holds is good, and an error
+  /// here would turn a perfectly successful offline start into a scary one.
+  Future<Session?> _renewed(Session? session) async {
+    if (session == null) return null;
+    widget.api.setToken(session.token);
+    try {
+      final data = await widget.api.refreshToken();
+      final next = Session(
+        token: data['access_token'] as String,
+        workerId: session.workerId,
+        role: session.role,
+        workerName: session.workerName,
+      );
+      await Session.save(next);
+      return next;
+    } catch (_) {
+      return session;
+    }
   }
 
   @override

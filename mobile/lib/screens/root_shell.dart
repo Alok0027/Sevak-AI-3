@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_strings.dart';
 import '../widgets/language_picker.dart';
+import '../widgets/tutorial_overlay.dart';
 import '../services/api_client.dart';
 import '../services/offline_queue.dart';
 import '../services/refresh_signal.dart';
 import '../services/session.dart';
 import '../services/sync_service.dart';
+import 'help_screen.dart';
 import 'home_screen.dart';
 import 'login_screen.dart';
 import 'patient_list_screen.dart';
@@ -38,6 +40,14 @@ class _RootShellState extends State<RootShell> {
   /// would show whatever it loaded at login for the rest of the session.
   final _refresh = RefreshSignal();
 
+  /// What the first-run tour points at. They live on the shell because
+  /// these are the three controls an ASHA has to find before the app is
+  /// any use to her, and all three are in the shell's chrome rather than
+  /// in a tab's body.
+  final _patientsTabKey = GlobalKey();
+  final _syncKey = GlobalKey();
+  final _helpKey = GlobalKey();
+
   static const _titleKeys = ['home', 'myPatients', 'followUps'];
 
   @override
@@ -49,6 +59,62 @@ class _RootShellState extends State<RootShell> {
     // audio into real visits on the server, so the tabs have to be told.
     _syncService.start(onFlushed: _onDataChanged);
     _refreshPending();
+    _maybeShowTutorial();
+  }
+
+  /// First sign-in on this phone, for this worker: show her round.
+  ///
+  /// After the first frame, because the tour measures the real controls to
+  /// draw arrows at them and they do not have positions until they have
+  /// been laid out.
+  Future<void> _maybeShowTutorial() async {
+    if (await TutorialPreference.hasSeen(widget.session.workerId)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _runTutorial();
+    });
+  }
+
+  Future<void> _runTutorial() async {
+    // Marked seen when it starts, not when it finishes. She may well swipe
+    // out of it or lose the app to a phone call; re-showing an uninvited
+    // tour every single launch is how a helpful thing becomes an enemy.
+    // Help has "Show me how to use the app" for anyone who wants it back.
+    await TutorialPreference.markSeen(widget.session.workerId);
+    if (!mounted) return;
+    await showTutorial(context, [
+      const TutorialStep(titleKey: 'tutWelcomeTitle', bodyKey: 'tutWelcomeBody'),
+      TutorialStep(
+        target: _patientsTabKey,
+        titleKey: 'tutPatientsTitle',
+        bodyKey: 'tutPatientsBody',
+      ),
+      // No target: the mic she is being told about lives on a patient row,
+      // inside the tab she has just been shown, and pointing at a control
+      // on a screen she is not looking at would be worse than saying it
+      // plainly. This is the step that matters most -- speaking instead of
+      // writing is the whole product.
+      const TutorialStep(titleKey: 'tutRecordTitle', bodyKey: 'tutRecordBody'),
+      TutorialStep(
+        target: _syncKey,
+        titleKey: 'tutSyncTitle',
+        bodyKey: 'tutSyncBody',
+        circular: true,
+      ),
+      TutorialStep(
+        target: _helpKey,
+        titleKey: 'tutHelpTitle',
+        bodyKey: 'tutHelpBody',
+        circular: true,
+      ),
+    ]);
+  }
+
+  void _openHelp() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => HelpScreen(api: widget.api, onReplayTutorial: _runTutorial),
+      ),
+    );
   }
 
   @override
@@ -158,10 +224,17 @@ class _RootShellState extends State<RootShell> {
                 ? const SizedBox(
                     width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                 : Badge(
+                    key: _syncKey,
                     label: Text('$_pendingCount'),
                     isLabelVisible: _pendingCount > 0,
                     child: Icon(_pendingCount > 0 ? Icons.cloud_off : Icons.cloud_done),
                   ),
+          ),
+          IconButton(
+            key: _helpKey,
+            onPressed: _openHelp,
+            icon: const Icon(Icons.help_outline_rounded),
+            tooltip: tr(context, 'help'),
           ),
           IconButton(
             onPressed: _logout,
@@ -186,6 +259,7 @@ class _RootShellState extends State<RootShell> {
             label: tr(context, 'home'),
           ),
           NavigationDestination(
+            key: _patientsTabKey,
             icon: const Icon(Icons.people_outline),
             selectedIcon: const Icon(Icons.people),
             label: tr(context, 'myPatients'),

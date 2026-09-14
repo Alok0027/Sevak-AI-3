@@ -358,7 +358,7 @@ class _VoiceRecordScreenState extends State<VoiceRecordScreen> {
   /// Step 0 -- the recorder itself.
   List<Widget> _recordStep(BuildContext context) => [
         DropdownButtonFormField<String>(
-          value: _languageCode,
+          initialValue: _languageCode,
           borderRadius: BorderRadius.circular(T.radius),
           decoration: InputDecoration(labelText: tr(context, 'language')),
           items: _speechLanguages.entries
@@ -544,7 +544,7 @@ class _VoiceRecordScreenState extends State<VoiceRecordScreen> {
               ),
               const SizedBox(height: T.s3),
               DropdownButtonFormField<String>(
-                value: _medicationCompliance,
+                initialValue: _medicationCompliance,
                 borderRadius: BorderRadius.circular(T.radius),
                 decoration: InputDecoration(labelText: tr(context, 'medication')),
                 items: _complianceLabels(context)

@@ -50,11 +50,134 @@ class ApiClient {
       body: jsonEncode({'phone': phone, 'pin': pin}),
     );
     if (resp.statusCode != 200) {
-      throw ApiException('Login failed: ${resp.body}');
+      // The reason, not the raw body. A worker whose registration is
+      // simply unapproved was being shown a JSON blob on her login screen.
+      throw ApiException(_detail(resp.body) ?? 'Login failed', status: resp.statusCode);
     }
     final data = jsonDecode(resp.body) as Map<String, dynamic>;
     _token = data['access_token'] as String;
     return data;
+  }
+
+  /// Ask for an account. Returns no token: registering is a request, and
+  /// an admin has to approve it before she can sign in.
+  Future<Map<String, dynamic>> register({
+    required String name,
+    required String phone,
+    required String pin,
+    required String role,
+    String? subCentreId,
+    String languagePref = 'hi',
+  }) async {
+    final resp = await http.post(
+      Uri.parse('$baseUrl/api/v1/auth/register'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'name': name,
+        'phone': phone,
+        'pin': pin,
+        'role': role,
+        'sub_centre_id': subCentreId,
+        'language_pref': languagePref,
+      }),
+    );
+    if (resp.statusCode != 201) {
+      throw ApiException(_detail(resp.body) ?? 'Registration failed', status: resp.statusCode);
+    }
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
+
+  /// Change your own PIN. The current one is required, so an unlocked
+  /// phone left on a table is not an account takeover.
+  Future<void> changePin({required String currentPin, required String newPin}) async {
+    final resp = await http.post(
+      Uri.parse('$baseUrl/api/v1/auth/change-pin'),
+      headers: _headers,
+      body: jsonEncode({'current_pin': currentPin, 'new_pin': newPin}),
+    );
+    if (resp.statusCode != 204) {
+      throw ApiException(_detail(resp.body) ?? 'Could not change the PIN', status: resp.statusCode);
+    }
+  }
+
+  /// FastAPI puts the human-readable reason in `detail`. Without pulling it
+  /// out, an ASHA whose registration is simply unapproved gets a raw JSON
+  /// body on her login screen and no idea what to do about it.
+  static String? _detail(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map && decoded['detail'] is String) return decoded['detail'] as String;
+    } catch (_) {
+      // Not JSON. Fall through to the caller's own message.
+    }
+    return null;
+  }
+
+  /// Trade the stored token for a fresh one, so time offline never runs it
+  /// out (FR-07.1). Called on every online app start. A failure here is not
+  /// something the worker should ever be shown: the token she already holds
+  /// is still valid until it isn't, and the next start will try again.
+  Future<Map<String, dynamic>> refreshToken() async {
+    final resp = await http.post(Uri.parse('$baseUrl/api/v1/auth/refresh'), headers: _headers);
+    if (resp.statusCode != 200) {
+      throw ApiException('Refresh failed: ${resp.body}');
+    }
+    final data = jsonDecode(resp.body) as Map<String, dynamic>;
+    _token = data['access_token'] as String;
+    return data;
+  }
+
+  /// Who she can ring when she is stuck: her ANM, and the block office.
+  /// Server-side rather than baked into the app, because the ANM covering
+  /// a sub-centre changes and a number shipped in a release goes stale.
+  Future<List<Map<String, dynamic>>> fetchSupportContacts() async {
+    final resp = await http.get(Uri.parse('$baseUrl/api/v1/support/contacts'), headers: _headers);
+    if (resp.statusCode != 200) {
+      throw ApiException('Failed to load contacts: ${resp.body}');
+    }
+    final data = jsonDecode(resp.body) as Map<String, dynamic>;
+    return (data['contacts'] as List).cast<Map<String, dynamic>>();
+  }
+
+  /// Report a problem with the app itself. Needs signal -- deliberately not
+  /// queued offline: a bug report that arrives three days late is worth
+  /// much less than the honest "send this when you have bars" message.
+  Future<Map<String, dynamic>> reportProblem({
+    required String category,
+    required String message,
+    String? appVersion,
+    String? deviceInfo,
+    String? language,
+  }) async {
+    final resp = await http.post(
+      Uri.parse('$baseUrl/api/v1/support/tickets'),
+      headers: _headers,
+      body: jsonEncode({
+        'category': category,
+        'message': message,
+        'app_version': appVersion,
+        'device_info': deviceInfo,
+        'language': language,
+      }),
+    );
+    if (resp.statusCode != 201) {
+      throw ApiException('Could not send report: ${resp.body}');
+    }
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
+
+  /// What she has reported, and whether anybody answered. Without this the
+  /// Help screen is a suggestion box with no bottom.
+  Future<List<Map<String, dynamic>>> fetchMyReports() async {
+    final resp = await http.get(
+      Uri.parse('$baseUrl/api/v1/support/tickets/mine'),
+      headers: _headers,
+    );
+    if (resp.statusCode != 200) {
+      throw ApiException('Failed to load reports: ${resp.body}');
+    }
+    final data = jsonDecode(resp.body) as Map<String, dynamic>;
+    return (data['tickets'] as List).cast<Map<String, dynamic>>();
   }
 
   /// Register a new patient under the signed-in ASHA worker -- must happen
@@ -295,7 +418,14 @@ class ApiClient {
 
 class ApiException implements Exception {
   final String message;
-  ApiException(this.message);
+
+  /// The HTTP status, when the caller needs to tell one refusal from
+  /// another -- 403 on login means "waiting for approval", 401 means the
+  /// PIN is wrong, and those two want very different things said to her.
+  final int? status;
+
+  ApiException(this.message, {this.status});
+
   @override
   String toString() => message;
 }

@@ -73,7 +73,10 @@ def _alerts_for(db, flag):
 
 def test_escalating_produces_an_alert_addressed_to_the_anm(db):
     flag = _stale_high_flag(db)
-    assert check_and_escalate(db) == [flag.flag_id]
+    # `in`, not `==`: check_and_escalate sweeps every stale HIGH flag in the
+    # district, and the seeded demo caseload puts others there. What this
+    # test is about is that *this* flag escalated, not that it was alone.
+    assert flag.flag_id in check_and_escalate(db)
 
     alerts = _alerts_for(db, flag)
     assert len(alerts) == 1, "the flag escalated without telling anyone"
