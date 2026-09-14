@@ -66,6 +66,17 @@ _BOUNDARY_WORDS = (
         "bp", "बीपी", "sugar", "शुगर", "शक्कर",
         "hai", "hain", "mein", "me", "se", "ka", "ki", "ke", "rehti", "rehta",
         "है", "हैं", "में", "से", "का", "की", "के", "को", "और", "पर",
+        # How an ASHA opens a visit: the patient's name, then straight into
+        # what is wrong. "जानकी कुमारी तबीयत खराब है" came back as a
+        # four-word name, because nothing here said a complaint is not a
+        # surname. Cosmetic rather than clinical -- the ASHA edits the
+        # field before saving -- but it is the first thing she sees, and a
+        # form that gets the name obviously wrong reads as one that cannot
+        # be trusted with the readings either.
+        "tabiyat", "tabiat", "bimar", "bimari", "taklif", "dard", "bukhar",
+        "तबीयत", "तबियत", "खराब", "ख़राब", "बीमार", "बीमारी", "तकलीफ",
+        "तकलीफ़", "दर्द", "बुखार", "बुख़ार", "कमज़ोर", "कमजोर", "चक्कर",
+        "उल्टी", "सूजन", "खून", "दिक्कत", "परेशानी", "शिकायत",
     }
 )
 

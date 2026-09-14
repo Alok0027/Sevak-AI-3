@@ -28,6 +28,16 @@ _PLAUSIBLE_SUGAR = range(30, 801)
 # "140/90", "140 बटा 90") and sometimes not at all ("बीपी 140 90").
 _BP_LEAD = r"(?:BP|बीपी|बी\.?\s?पी\.?|blood\s*pressure|रक्तचाप)"
 _BP_SEPARATOR = r"over|by|/|-|बटा|बाय|पर"
+# Nobody says "BP 160 by 130". They say "BP *is* 160 by 130", or "BP *ka*
+# 160 by 130". Before this, one such word between the label and the number
+# meant no reading at all -- a real transcript, read correctly by Bhashini,
+# produced an empty blood pressure and a visit that could not be assessed.
+#
+# A closed list rather than "skip any few words": the numbers here are fed
+# straight to the NHM thresholds, and a permissive gap lets the label bind
+# to a number from the next clause entirely ("BP normal hai, sugar 220").
+# Two fillers is enough for the way this is actually spoken.
+_BP_FILLER = r"(?:\s+(?:है|हैं|हैI|का|की|के|तो|अभी|is|was|reading)){0,2}"
 # Tried in this order deliberately. With the separator optional, an
 # unrecognised second number lets the regex backtrack and pair up two
 # fragments of the *first* one instead -- "एक सौ पचास बटा पंचानवे" comes
@@ -35,9 +45,9 @@ _BP_SEPARATOR = r"over|by|/|-|बटा|बाय|पर"
 # range check and reach the risk engine. Requiring the separator first
 # means that case finds no match at all, which is the safe answer.
 _BP_WITH_SEPARATOR_RE = re.compile(
-    rf"{_BP_LEAD}\s*({_NUM})\s*(?:{_BP_SEPARATOR})\s*({_NUM})", re.IGNORECASE
+    rf"{_BP_LEAD}{_BP_FILLER}\s*({_NUM})\s*(?:{_BP_SEPARATOR})\s*({_NUM})", re.IGNORECASE
 )
-_BP_BARE_RE = re.compile(rf"{_BP_LEAD}\s*({_NUM})\s+({_NUM})", re.IGNORECASE)
+_BP_BARE_RE = re.compile(rf"{_BP_LEAD}{_BP_FILLER}\s*({_NUM})\s+({_NUM})", re.IGNORECASE)
 # If a separator was actually spoken, the bare form must not be tried at
 # all: it would pair two halves of the systolic reading across it.
 _BP_HAS_SEPARATOR_RE = re.compile(rf"{_BP_LEAD}.{{0,40}}?(?:{_BP_SEPARATOR})", re.IGNORECASE)
