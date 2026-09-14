@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../l10n/app_strings.dart';
 import '../models/patient.dart';
 import '../services/api_client.dart';
+import '../services/refresh_signal.dart';
 import '../theme/tokens.dart';
 import '../widgets/status_group.dart';
 import 'add_patient_screen.dart';
@@ -18,11 +19,17 @@ class PatientListScreen extends StatefulWidget {
   final String workerId;
   final VoidCallback? onVisitRecorded;
 
+  /// Pinged by the shell whenever server state changes or this tab is
+  /// opened. This screen lives inside an IndexedStack that never disposes
+  /// it, so this is what keeps the list from being frozen at login.
+  final RefreshSignal? refresh;
+
   const PatientListScreen({
     super.key,
     required this.api,
     required this.workerId,
     this.onVisitRecorded,
+    this.refresh,
   });
 
   @override
@@ -37,12 +44,27 @@ class _PatientListScreenState extends State<PatientListScreen> {
   void initState() {
     super.initState();
     _patientsFuture = widget.api.fetchPatients(widget.workerId);
+    widget.refresh?.addListener(_refresh);
+  }
+
+  @override
+  void dispose() {
+    widget.refresh?.removeListener(_refresh);
+    super.dispose();
   }
 
   Future<void> _refresh() async {
+    if (!mounted) return;
     final next = widget.api.fetchPatients(widget.workerId);
     setState(() => _patientsFuture = next);
-    await next;
+    try {
+      await next;
+    } catch (_) {
+      // The FutureBuilder below shows the failure. Awaiting here is only
+      // so the pull-to-refresh spinner stops when the request does -- and
+      // swallowing it matters now that the signal calls this too: an ASHA
+      // with no bars switching tabs would otherwise throw into no handler.
+    }
   }
 
   Future<void> _recordVisit(Patient p) async {
@@ -51,8 +73,10 @@ class _PatientListScreenState extends State<PatientListScreen> {
         builder: (_) => VoiceRecordScreen(api: widget.api, workerId: widget.workerId, patient: p),
       ),
     );
+    // Fires the shared signal, which refreshes this list along with the
+    // other tabs -- so one recording is enough, wherever it was made.
     widget.onVisitRecorded?.call();
-    _refresh();
+    if (widget.refresh == null) _refresh();
   }
 
   Future<void> _addPatient() async {

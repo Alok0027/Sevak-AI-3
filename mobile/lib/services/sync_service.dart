@@ -15,12 +15,16 @@ class SyncService {
 
   SyncService({required this.api, required this.queue, required this.workerId});
 
-  void start() {
+  /// [onFlushed] fires after a flush that actually pushed something, so the
+  /// screens can refetch. Without it a visit recorded with no signal turns
+  /// into a real server record silently, and the ASHA is left looking at a
+  /// patient list that still shows her as never visited.
+  void start({void Function()? onFlushed}) {
     Connectivity().onConnectivityChanged.listen((results) async {
       final online = !results.contains(ConnectivityResult.none);
-      if (online) {
-        await flushNow();
-      }
+      if (!online) return;
+      final result = await flushNow();
+      if ((result['synced'] as int? ?? 0) > 0) onFlushed?.call();
     });
   }
 

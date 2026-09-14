@@ -4,6 +4,7 @@ import '../l10n/app_strings.dart';
 import '../widgets/language_picker.dart';
 import '../services/api_client.dart';
 import '../services/offline_queue.dart';
+import '../services/refresh_signal.dart';
 import '../services/session.dart';
 import '../services/sync_service.dart';
 import 'home_screen.dart';
@@ -32,6 +33,11 @@ class _RootShellState extends State<RootShell> {
   int _pendingCount = 0;
   bool _syncing = false;
 
+  /// Shared by all three tabs -- see services/refresh_signal.dart. The
+  /// IndexedStack below keeps every tab alive, so without this each one
+  /// would show whatever it loaded at login for the rest of the session.
+  final _refresh = RefreshSignal();
+
   static const _titleKeys = ['home', 'myPatients', 'followUps'];
 
   @override
@@ -39,8 +45,16 @@ class _RootShellState extends State<RootShell> {
     super.initState();
     _queue = OfflineQueue();
     _syncService = SyncService(api: widget.api, queue: _queue, workerId: widget.session.workerId);
-    _syncService.start(); // FR-01.3: auto-flush queued visits once online
+    // FR-01.3: auto-flush queued visits once online. A flush turns queued
+    // audio into real visits on the server, so the tabs have to be told.
+    _syncService.start(onFlushed: _onDataChanged);
     _refreshPending();
+  }
+
+  @override
+  void dispose() {
+    _refresh.dispose();
+    super.dispose();
   }
 
   Future<void> _refreshPending() async {
@@ -48,11 +62,20 @@ class _RootShellState extends State<RootShell> {
     if (mounted) setState(() => _pendingCount = count);
   }
 
+  /// Something changed on the server: a visit was submitted, a queued one
+  /// synced, a follow-up ticked off. Update the sync badge and tell every
+  /// tab to refetch, so she never has to record the same visit twice just
+  /// because the list still says "no visits recorded yet".
+  void _onDataChanged() {
+    _refreshPending();
+    _refresh.ping();
+  }
+
   Future<void> _syncNow() async {
     setState(() => _syncing = true);
     try {
       final result = await _syncService.flushNow();
-      await _refreshPending();
+      _onDataChanged();
       if (!mounted) return;
       final synced = result['synced'] as int? ?? 0;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -102,13 +125,23 @@ class _RootShellState extends State<RootShell> {
   @override
   Widget build(BuildContext context) {
     final screens = [
-      HomeScreen(api: widget.api, session: widget.session, onVisitRecorded: _refreshPending),
+      HomeScreen(
+        api: widget.api,
+        session: widget.session,
+        onVisitRecorded: _onDataChanged,
+        refresh: _refresh,
+      ),
       PatientListScreen(
         api: widget.api,
         workerId: widget.session.workerId,
-        onVisitRecorded: _refreshPending,
+        onVisitRecorded: _onDataChanged,
+        refresh: _refresh,
       ),
-      TaskListScreen(api: widget.api, workerId: widget.session.workerId),
+      TaskListScreen(
+        api: widget.api,
+        workerId: widget.session.workerId,
+        refresh: _refresh,
+      ),
     ];
 
     return Scaffold(
@@ -142,7 +175,9 @@ class _RootShellState extends State<RootShell> {
         selectedIndex: _index,
         onDestinationSelected: (i) {
           setState(() => _index = i);
-          _refreshPending();
+          // Opening a tab reloads it. The stack never disposes a tab, so
+          // this is the only moment it can be brought up to date.
+          _onDataChanged();
         },
         destinations: [
           NavigationDestination(

@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../l10n/app_strings.dart';
 import '../models/history_models.dart';
 import '../services/api_client.dart';
+import '../services/refresh_signal.dart';
 import '../services/session.dart';
 import '../theme/tokens.dart';
 import '../widgets/stat_strip.dart';
@@ -25,7 +26,18 @@ class HomeScreen extends StatefulWidget {
   final Session session;
   final VoidCallback? onVisitRecorded;
 
-  const HomeScreen({super.key, required this.api, required this.session, this.onVisitRecorded});
+  /// Pinged by the shell when server state changes or this tab is opened.
+  /// The IndexedStack keeps this screen alive all session, so her numbers
+  /// would otherwise stay at whatever they were when she signed in.
+  final RefreshSignal? refresh;
+
+  const HomeScreen({
+    super.key,
+    required this.api,
+    required this.session,
+    this.onVisitRecorded,
+    this.refresh,
+  });
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -39,15 +51,27 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _historyFuture = widget.api.fetchWorkerHistory(widget.session.workerId);
+    widget.refresh?.addListener(_refresh);
+  }
+
+  @override
+  void dispose() {
+    widget.refresh?.removeListener(_refresh);
+    super.dispose();
   }
 
   Future<void> _refresh() async {
+    if (!mounted) return;
     final next = widget.api.fetchWorkerHistory(widget.session.workerId);
     setState(() {
       _historyFuture = next;
       _todayKey = UniqueKey(); // re-fetches today's list against the server too
     });
-    await next;
+    try {
+      await next;
+    } catch (_) {
+      // Shown by the FutureBuilder; see patient_list_screen.dart.
+    }
   }
 
   String _greeting(BuildContext context) {
