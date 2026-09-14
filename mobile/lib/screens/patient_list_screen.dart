@@ -57,7 +57,9 @@ class _PatientListScreenState extends State<PatientListScreen> {
 
   Future<void> _addPatient() async {
     final created = await Navigator.of(context).push<Patient>(
-      MaterialPageRoute(builder: (_) => AddPatientScreen(api: widget.api)),
+      MaterialPageRoute(
+        builder: (_) => AddPatientScreen(api: widget.api, workerId: widget.workerId),
+      ),
     );
     if (created == null) return;
     await _refresh();

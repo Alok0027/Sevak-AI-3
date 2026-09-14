@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
@@ -28,6 +29,60 @@ class OfflineQueue {
       '''),
     );
     return _db!;
+  }
+
+  /// A patient id the phone can mint with no server and no signal.
+  ///
+  /// The backend's patient_id is a plain string primary key, so an id
+  /// generated here survives sync unchanged -- which is the whole point: a
+  /// visit recorded minutes after an offline registration references this
+  /// id, and both resolve when the queue flushes. A server-assigned id
+  /// would arrive too late to be referenced.
+  ///
+  /// Formatted as a v4 UUID rather than a timestamp so it cannot collide
+  /// with another ASHA's offline registration in the same second, and
+  /// Random.secure() rather than Random() because two phones starting from
+  /// the same seed is exactly the collision that matters.
+  static String newLocalId() {
+    final r = Random.secure();
+    String hex(int n) => List.generate(n, (_) => r.nextInt(16).toRadixString(16)).join();
+    // Version 4, variant 1 -- the two fixed nibbles that mark it as random.
+    return '${hex(8)}-${hex(4)}-4${hex(3)}-'
+        '${(8 + r.nextInt(4)).toRadixString(16)}${hex(3)}-${hex(12)}';
+  }
+
+  /// FR-07.1: a patient registered with no signal.
+  ///
+  /// Queued with the id already decided, so the visits she is about to
+  /// receive can reference her before the server has ever heard of her.
+  Future<void> enqueuePatient({
+    required String workerId,
+    required String patientId,
+    required String name,
+    int? age,
+    String? gender,
+    String? village,
+    String? phone,
+    String? pregnancyStage,
+  }) async {
+    final db = await _database;
+    await db.insert('sync_queue', {
+      'queue_id': DateTime.now().microsecondsSinceEpoch.toString(),
+      'worker_id': workerId,
+      'record_type': 'patient',
+      'record_json': jsonEncode({
+        'record_type': 'patient',
+        'patient_id': patientId,
+        'name': name,
+        'age': age,
+        'gender': gender,
+        'village': village,
+        'phone': phone,
+        'pregnancy_stage': pregnancyStage,
+      }),
+      'created_at': DateTime.now().toIso8601String(),
+      'retry_count': 0,
+    });
   }
 
   Future<void> enqueueVisit({

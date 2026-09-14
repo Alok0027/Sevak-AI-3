@@ -9,6 +9,27 @@ letter, a WhatsApp message, and an auto-populated government report --
 end-to-end in under 30 seconds. Full requirements: `SevakAI SRS.docx` and
 `EOI_MUJ_GenSim.pptx` one level up from this folder.
 
+## Live
+
+| | |
+|---|---|
+| Dashboard (ANM / BMO / Admin) | https://sevak-ai-3-phi.vercel.app |
+| API | https://sevakai-api.onrender.com — health check at `/health` |
+| Mobile | `flutter build apk --release` (see Deployment below) |
+
+Demo logins, all PIN `1234`:
+
+| Role | Phone |
+|---|---|
+| ASHA (Sunita Sharma) | 9999999999 |
+| ANM (Dr. Rekha Joshi) | 9999999901 |
+| BMO (Dr. Vikram Rao) | 9999999902 |
+| Admin | 9999999903 |
+
+The API sleeps after 15 minutes idle on Render's free tier. The first
+request wakes it and takes about 50 seconds; everything after that is
+immediate. Open it a minute before you need it.
+
 ## Status: backend pipeline is real and tested; mobile/dashboard scaffolded
 
 | Component | State |

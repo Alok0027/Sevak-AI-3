@@ -3,6 +3,8 @@ __pycache__/
 *.pyc
 .venv/
 *.db
+*.db.old
+*.db.bak
 backend/generated_reports/
 
 # Node

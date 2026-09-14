@@ -1,12 +1,15 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
 import '../l10n/app_strings.dart';
+import '../models/patient.dart';
 import '../services/api_client.dart';
+import '../services/offline_queue.dart';
 import '../theme/tokens.dart';
 import '../widgets/status_group.dart';
 
@@ -25,13 +28,16 @@ import '../widgets/status_group.dart';
 class AddPatientScreen extends StatefulWidget {
   final ApiClient api;
 
-  const AddPatientScreen({super.key, required this.api});
+  final String workerId;
+
+  const AddPatientScreen({super.key, required this.api, required this.workerId});
 
   @override
   State<AddPatientScreen> createState() => _AddPatientScreenState();
 }
 
 class _AddPatientScreenState extends State<AddPatientScreen> {
+  final _queue = OfflineQueue();
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _ageController = TextEditingController();
@@ -170,6 +176,22 @@ class _AddPatientScreenState extends State<AddPatientScreen> {
       final phone = _phoneController.text.trim();
       final pregnancy = _pregnancyController.text.trim();
       final gender = _genderController.text.trim();
+      // Registering a patient is on the offline path (FR-07.1), same as
+      // recording a visit: an ASHA standing in a house with no signal has
+      // to be able to save the woman in front of her and move on. The id
+      // is minted here so the visit she may record two minutes later can
+      // reference it before the server has ever heard of her.
+      final connectivity = await Connectivity().checkConnectivity();
+      if (connectivity.contains(ConnectivityResult.none)) {
+        final local = await _queueLocally();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(tr(context, 'offlineSaved'))),
+        );
+        Navigator.of(context).pop(local);
+        return;
+      }
+
       final patient = await widget.api.createPatient(
         name: _nameController.text.trim(),
         age: age.isEmpty ? null : int.tryParse(age),
@@ -185,10 +207,58 @@ class _AddPatientScreenState extends State<AddPatientScreen> {
       if (!mounted) return;
       Navigator.of(context).pop(patient);
     } catch (e) {
-      setState(() => _error = e.toString());
+      // Could not reach the server at all. Queue rather than lose the
+      // registration -- the same fallback the record screen takes, and for
+      // the same reason: the ASHA has already done the work of asking.
+      //
+      // A validation error from the server would also land here and be
+      // queued, where it will fail again on flush and surface then. That
+      // is the deliberate trade: a transcription of a real woman is worth
+      // more than a tidy queue, and the alternative is discarding her
+      // details because we could not tell which kind of failure it was.
+      try {
+        final local = await _queueLocally();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(tr(context, 'offlineSaved'))),
+        );
+        Navigator.of(context).pop(local);
+        return;
+      } catch (_) {
+        setState(() => _error = e.toString());
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  /// Write the form to the offline queue and hand back the patient the
+  /// list should show in the meantime, carrying the id sync will use.
+  Future<Patient> _queueLocally() async {
+    final id = OfflineQueue.newLocalId();
+    final age = _ageController.text.trim();
+    final village = _villageController.text.trim();
+    final phone = _phoneController.text.trim();
+    final pregnancy = _pregnancyController.text.trim();
+    final gender = _genderController.text.trim();
+    final name = _nameController.text.trim();
+    await _queue.enqueuePatient(
+      workerId: widget.workerId,
+      patientId: id,
+      name: name,
+      age: age.isEmpty ? null : int.tryParse(age),
+      gender: gender.isEmpty ? null : gender,
+      village: village.isEmpty ? null : village,
+      phone: phone.isEmpty ? null : phone,
+      pregnancyStage: pregnancy.isEmpty ? null : pregnancy,
+    );
+    return Patient(
+      id: id,
+      name: name,
+      age: age.isEmpty ? null : int.tryParse(age),
+      village: village.isEmpty ? null : village,
+      pregnancyStage: pregnancy.isEmpty ? null : pregnancy,
+    );
   }
 
   @override

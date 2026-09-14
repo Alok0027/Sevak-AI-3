@@ -29,7 +29,10 @@ from app.db.models.patient import Patient
 from app.db.models.risk_flag import RiskFlag
 from app.db.models.visit import Visit
 from app.db.models.worker import Worker
+from app.agents.agent2_risk_classification import classify
+from app.agents.agent3_action_generation import FOLLOWUP_DAYS as AGENT3_FOLLOWUP_DAYS
 from app.db.session import SessionLocal, init_db
+from app.schemas.visit import ExtractedFields
 
 fake = Faker("en_IN")
 
@@ -102,12 +105,115 @@ def seed_demo_fixtures(db) -> None:
     print(f"Demo patient -> {meera.name} (patient_id: {meera.patient_id})")
 
 
+# Where a real maternal-vitals distribution can be read from, if you have
+# downloaded one. Optional on purpose: the seeder works without it, and
+# nothing in the demo depends on the file being present.
+#
+#   https://archive.ics.uci.edu/dataset/863/maternal+health+risk
+#   save Maternal Health Risk Data Set.csv as backend/data/maternal_vitals.csv
+#
+# Worth adding because real blood pressure and blood sugar co-vary, and two
+# independent random draws do not -- you get a woman at 170/110 with
+# textbook-normal glucose more often than pregnancy does.
+VITALS_CSV = Path(__file__).resolve().parent.parent / "data" / "maternal_vitals.csv"
+
+# Rough clinical bands used when the CSV is absent. Deliberately not one
+# band per risk level: the point of this rewrite is that the risk level is
+# *computed* from the vitals, so what is chosen here is how well the woman
+# is, and the classifier decides what that means.
+_PROFILES = [
+    ("well",       0.55),
+    ("borderline", 0.30),
+    ("unwell",     0.15),
+]
+
+
+def _load_vitals_rows() -> list[dict]:
+    """Read the UCI maternal-vitals CSV if it is there, converting units.
+
+    The dataset records blood sugar in mmol/L and body temperature in
+    Fahrenheit; this project uses mg/dL and Celsius throughout. Loading it
+    raw would put every glucose reading around 7 -- far below the 126
+    mg/dL threshold -- and every temperature near 98, which reads as a
+    fatal fever. Converting here rather than at every use site means a
+    future caller cannot forget.
+    """
+    if not VITALS_CSV.exists():
+        return []
+    import csv
+
+    rows: list[dict] = []
+    with VITALS_CSV.open(newline="", encoding="utf-8") as fh:
+        for raw in csv.DictReader(fh):
+            try:
+                rows.append({
+                    "bp_systolic": int(float(raw["SystolicBP"])),
+                    "bp_diastolic": int(float(raw["DiastolicBP"])),
+                    # mmol/L -> mg/dL
+                    "blood_sugar_random": int(round(float(raw["BS"]) * 18.0182)),
+                    # Fahrenheit -> Celsius
+                    "temperature_c": round((float(raw["BodyTemp"]) - 32) * 5 / 9, 1),
+                })
+            except (KeyError, ValueError, TypeError):
+                continue  # one malformed row must not cost the whole file
+    return rows
+
+
+_VITALS_ROWS: list[dict] | None = None
+
+
+def _synthetic_vitals() -> dict:
+    """Plausible vitals for one visit, when no CSV is available."""
+    profile = random.choices([p for p, _ in _PROFILES], weights=[w for _, w in _PROFILES])[0]
+    if profile == "well":
+        return {
+            "bp_systolic": random.randint(100, 125),
+            "bp_diastolic": random.randint(65, 82),
+            "blood_sugar_random": random.randint(80, 130),
+            "temperature_c": round(random.uniform(36.4, 37.2), 1),
+        }
+    if profile == "borderline":
+        return {
+            "bp_systolic": random.randint(126, 139),
+            "bp_diastolic": random.randint(83, 89),
+            "blood_sugar_random": random.randint(140, 195),
+            "temperature_c": round(random.uniform(37.0, 37.8), 1),
+        }
+    return {
+        "bp_systolic": random.randint(140, 175),
+        "bp_diastolic": random.randint(90, 115),
+        "blood_sugar_random": random.randint(200, 280),
+        "temperature_c": round(random.uniform(37.5, 39.0), 1),
+    }
+
+
+def make_visit_vitals() -> dict:
+    """One visit's readings -- from the real dataset when present."""
+    global _VITALS_ROWS
+    if _VITALS_ROWS is None:
+        _VITALS_ROWS = _load_vitals_rows()
+    if _VITALS_ROWS:
+        return dict(random.choice(_VITALS_ROWS))
+    return _synthetic_vitals()
+
+
 def seed_random_workers(db, n_workers: int, patients_per_worker: int, months_history: int) -> None:
     # Put a handful of the random workers in the demo ANM's sub-centre
     # (SC-PUNE-01) so her roster/dashboard has more than the single demo
     # worker to show off sorting, filtering, and the leaderboard chart.
     demo_sub_centre_slots = min(6, n_workers)
+
+    # Progress, because this used to print nothing at all until it was
+    # completely finished. A thirty-second run and a hung one looked
+    # identical from the outside, so the honest response to either was to
+    # interrupt it -- which leaves a half-seeded database, because the
+    # commit below is per worker. Three interrupted runs is how you end up
+    # with 77 workers when you asked for 20.
+    print(f"Seeding {n_workers} workers x {patients_per_worker} patients, "
+          f"{months_history} months of history...", flush=True)
+
     for i in range(n_workers):
+        print(f"  worker {i + 1}/{n_workers}", end="\r", flush=True)
         sub_centre_id = (
             "SC-PUNE-01" if i < demo_sub_centre_slots else f"SC-{fake.city_suffix().upper()}-{random.randint(1, 20):02d}"
         )
@@ -143,15 +249,37 @@ def seed_random_workers(db, n_workers: int, patients_per_worker: int, months_his
 
             n_visits = random.randint(0, 3 * months_history)
             for _ in range(n_visits):
-                risk_level = random.choices(RISK_LEVELS, weights=RISK_WEIGHTS)[0]
+                # Risk is computed, not chosen. Every historical visit runs
+                # through the same classifier a live one does, over vitals
+                # that are actually stored on the visit.
+                #
+                # It used to be `random.choices(RISK_LEVELS, weights=...)`
+                # with structured_json="{}" and an unrelated random
+                # risk_score -- so a HIGH patient had no readings, no
+                # drivers that referred to anything, and a score that could
+                # contradict her own label. The dashboard's risk
+                # distribution was a weight somebody picked rather than an
+                # output of the system, and clicking into a flagged patient
+                # showed nothing behind the flag.
+                vitals = make_visit_vitals()
+                extracted = ExtractedFields(
+                    pregnancy_stage=patient.pregnancy_stage,
+                    medication_compliance=random.choices(
+                        ["compliant", "non_compliant"], weights=[0.8, 0.2]
+                    )[0],
+                    **vitals,
+                )
+                result = classify(extracted)
+                risk_level = result.risk_level
+
                 days_ago = random.randint(0, months_history * 30)
                 created_at = datetime.now(timezone.utc) - timedelta(days=days_ago)
                 visit = Visit(
                     patient_id=patient.patient_id,
                     worker_id=worker.worker_id,
                     transcript="[synthetic historical visit -- audio not retained]",
-                    structured_json="{}",
-                    risk_score=random.uniform(0.0, 1.0),
+                    structured_json=extracted.model_dump_json(),
+                    risk_score=result.risk_score,
                     risk_level=risk_level,
                     created_at=created_at,
                     synced_at=created_at,
@@ -159,12 +287,11 @@ def seed_random_workers(db, n_workers: int, patients_per_worker: int, months_his
                 db.add(visit)
                 db.flush()
 
-                drivers = DRIVER_TEMPLATES.get(risk_level, [])
                 db.add(
                     RiskFlag(
                         visit_id=visit.visit_id,
                         risk_level=risk_level,
-                        drivers_json=json.dumps([{"observation": d[0], "reason": d[1]} for d in drivers]),
+                        drivers_json=json.dumps([d.model_dump() for d in result.drivers]),
                         created_at=created_at,
                     )
                 )
@@ -172,7 +299,7 @@ def seed_random_workers(db, n_workers: int, patients_per_worker: int, months_his
                 # FR-04.3: every visit gets a follow-up task, due date by risk
                 # level. Older ones are randomly resolved so the dashboard's
                 # done/pending/overdue split has all three buckets populated.
-                due_days = FOLLOWUP_DAYS[risk_level]
+                due_days = AGENT3_FOLLOWUP_DAYS.get(risk_level, 30)
                 due_at = created_at + timedelta(days=due_days)
                 is_resolved = random.random() < (0.75 if days_ago > due_days else 0.2)
                 db.add(
@@ -205,6 +332,14 @@ def main() -> None:
     init_db()
     db = SessionLocal()
     try:
+        # Say what is already there before adding to it. The seeder appends
+        # rather than replaces, so running it twice doubles the district --
+        # worth seeing before it happens rather than after.
+        existing = db.query(Worker).count()
+        if existing:
+            print(f"NOTE: {existing} workers already in this database; "
+                  f"seeding ADDS to them. Delete the .db file first for a clean set.",
+                  flush=True)
         seed_demo_fixtures(db)
         seed_random_workers(db, n_workers=n_workers, patients_per_worker=patients_per_worker, months_history=args.months)
         total_workers = db.query(Worker).count()
