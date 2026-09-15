@@ -108,8 +108,14 @@ class _PatientListScreenState extends State<PatientListScreen> {
   /// "32 yrs · Wagholi · 4 visits · last 3 Sep" -- built from whatever is
   /// actually recorded, so a patient with only a name gets a short line
   /// rather than a line full of dashes.
+  ///
+  /// For a patient in today's work the reason comes first. She is reading
+  /// this at a gate with a bag on her shoulder: "2d overdue" has to land
+  /// before "32 yrs", because the age is context and the lateness is the
+  /// instruction.
   String _subtitle(BuildContext context, Patient p) {
     final parts = <String>[
+      if (p.needsAttention) _attention(context, p),
       if (p.age != null) '${p.age} ${tr(context, 'years')}',
       if (p.village != null && p.village!.isNotEmpty) p.village!,
     ];
@@ -119,8 +125,52 @@ class _PatientListScreenState extends State<PatientListScreen> {
     } else {
       parts.add(tr(context, 'noVisitsRecordedYet'));
     }
-    return parts.join('  ·  ');
+    return parts.where((s) => s.isNotEmpty).join('  ·  ');
   }
+
+  /// Hours under a day, days above it -- the HIGH follow-up window is only
+  /// 48 hours long, so rounding six hours late down to "0 days" would
+  /// report a missed emergency as fine.
+  String _attention(BuildContext context, Patient p) {
+    switch (p.attentionReason) {
+      case 'overdue':
+        return p.hoursOverdue < 24
+            ? tr(context, 'overdueHours').replaceAll('{n}', '${p.hoursOverdue}')
+            : tr(context, 'overdueDays').replaceAll('{n}', '${p.hoursOverdue ~/ 24}');
+      case 'due_today':
+        return tr(context, 'dueTodayShort');
+      case 'high_risk':
+        return tr(context, 'highRiskShort');
+      default:
+        return '';
+    }
+  }
+
+  StatusRow _row(BuildContext context, Patient p) => StatusRow(
+        railColour: T.risk(p.riskStatus),
+        // Her registered name, never translated.
+        title: p.name,
+        subtitle: _subtitle(context, p),
+        // Colours the subtitle in the rail's own colour and gives it
+        // weight. Deliberately the only extra emphasis an urgent row gets:
+        // the rail already carries the colour, and a red pill on top of a
+        // red rail beside red text is the same fact said three times.
+        subtitleIsUrgent: p.needsAttention,
+        trailing: IconButton(
+          icon: const Icon(Icons.mic, color: T.forest),
+          tooltip: tr(context, 'recordAVisit'),
+          onPressed: () => _recordVisit(p),
+        ),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => PatientDetailScreen(
+              api: widget.api,
+              patientId: p.id,
+              onVisitRecorded: widget.onVisitRecorded,
+            ),
+          ),
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -187,35 +237,39 @@ class _PatientListScreenState extends State<PatientListScreen> {
                       ],
                     );
                   }
+                  // The server has already ordered these worst-first. The
+                  // list keeps that order rather than re-deciding it, so
+                  // the ASHA and her ANM are never sorting the same ward
+                  // two different ways.
+                  final urgent = patients.where((p) => p.needsAttention).toList();
+                  final rest = patients.where((p) => !p.needsAttention).toList();
+
                   return ListView(
                     padding: const EdgeInsets.fromLTRB(T.s4, T.s2, T.s4, 96),
-                    children: [
-                      StatusGroup(
-                        children: [
-                          for (final p in patients)
-                            StatusRow(
-                              railColour: T.risk(p.riskStatus),
-                              // Her registered name, never translated.
-                              title: p.name,
-                              subtitle: _subtitle(context, p),
-                              trailing: IconButton(
-                                icon: const Icon(Icons.mic, color: T.forest),
-                                tooltip: tr(context, 'recordAVisit'),
-                                onPressed: () => _recordVisit(p),
-                              ),
-                              onTap: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => PatientDetailScreen(
-                                    api: widget.api,
-                                    patientId: p.id,
-                                    onVisitRecorded: widget.onVisitRecorded,
-                                  ),
-                                ),
-                              ),
+                    children: urgent.isEmpty
+                        // Nothing is urgent, so the screen says nothing.
+                        //
+                        // No "0 need attention" banner, no reassuring green
+                        // card. A quiet screen on a calm day is the signal;
+                        // a triage tool that decorates the absence of a
+                        // problem teaches the reader to ignore its
+                        // decorations, and then it has nothing left to say
+                        // on the day somebody is actually in trouble.
+                        ? [
+                            StatusGroup(children: [for (final p in rest) _row(context, p)]),
+                          ]
+                        : [
+                            SectionHeading(
+                              tr(context, 'needsAttentionToday'),
+                              trailing: '${urgent.length}',
                             ),
-                        ],
-                      ),
-                    ],
+                            StatusGroup(children: [for (final p in urgent) _row(context, p)]),
+                            if (rest.isNotEmpty) ...[
+                              const SizedBox(height: T.s6),
+                              SectionHeading(tr(context, 'everyoneElse')),
+                              StatusGroup(children: [for (final p in rest) _row(context, p)]),
+                            ],
+                          ],
                   );
                 },
               ),

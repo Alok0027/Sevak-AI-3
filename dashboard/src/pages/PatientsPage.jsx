@@ -10,6 +10,22 @@ function initials(name) {
   return name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
 }
 
+/** Why this patient is in today's work, in the fewest words that are still
+ *  true. Hours below a day, days above it -- the HIGH follow-up window is
+ *  only 48 hours long, so rounding six hours late down to "0 days" would
+ *  report a missed emergency as fine. Returns "" for a HIGH that is not
+ *  late: the severity tag beside it already says that, and repeating it
+ *  would make the note something to skim past. */
+function attentionNote(p) {
+  if (p.attention_reason === "overdue") {
+    return p.hours_overdue < 24
+      ? `${p.hours_overdue}h overdue`
+      : `${Math.floor(p.hours_overdue / 24)}d overdue`;
+  }
+  if (p.attention_reason === "due_today") return "Due today";
+  return "";
+}
+
 /** FR-08 drill-down: "which patients are my ASHA workers actually treating
  * right now" -- every patient in scope (ANM's sub-centre, or BMO/Admin's
  * whole district), filterable by gender, risk level, and when they were
@@ -47,14 +63,22 @@ export default function PatientsPage() {
       if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false;
       if (genderFilter !== "all" && (p.gender || "").toLowerCase() !== genderFilter) return false;
       if (riskFilter === "unrecorded" && p.risk_status) return false;
-      if (riskFilter !== "all" && riskFilter !== "unrecorded" && p.risk_status !== riskFilter) return false;
+      if (riskFilter === "attention" && !p.needs_attention) return false;
+      if (riskFilter !== "all" && riskFilter !== "unrecorded" && riskFilter !== "attention" && p.risk_status !== riskFilter)
+        return false;
       if (registeredAfter && new Date(p.registered_at) < new Date(registeredAfter)) return false;
       if (registeredBefore && new Date(p.registered_at) > new Date(`${registeredBefore}T23:59:59`)) return false;
       return true;
     });
   }, [patients, search, genderFilter, riskFilter, registeredAfter, registeredBefore]);
 
-  const { sorted, sortKey, direction, requestSort } = useSortableData(filtered, "registered_at", "desc");
+  // null, not "registered_at": the list arrives from the server already in
+  // triage order (backend/app/services/patient_priority.py), and the hook
+  // passes items through untouched when it has no key. Every column header
+  // still sorts on click -- this only changes what an ANM reads at 9am,
+  // which "newest registration first" was answering a question nobody had
+  // asked.
+  const { sorted, sortKey, direction, requestSort } = useSortableData(filtered, null);
 
   const columns = [
     { key: "name", label: "Patient" },
@@ -68,7 +92,11 @@ export default function PatientsPage() {
     { key: "registered_at", label: "Registered" },
   ];
 
-  const highCount = patients.filter((p) => p.risk_status === "HIGH").length;
+  // "Needs attention" rather than "HIGH": a mother two days past her
+  // follow-up is today's work even at MEDIUM, and a HIGH seen this morning
+  // is not. Counting HIGH alone reported a severity where the page is
+  // being asked about a workload.
+  const attentionCount = patients.filter((p) => p.needs_attention).length;
 
   return (
     <AppShell
@@ -77,7 +105,7 @@ export default function PatientsPage() {
       meta={
         loading
           ? "Loading…"
-          : `${patients.length} registered${highCount ? ` · ${highCount} currently HIGH risk` : ""}`
+          : `${patients.length} registered${attentionCount ? ` \u00b7 ${attentionCount} need attention today` : ""}`
       }
     >
       {error && <p className="error">{error}</p>}
@@ -101,6 +129,7 @@ export default function PatientsPage() {
           <option value="MEDIUM">MEDIUM only</option>
           <option value="LOW">LOW only</option>
           <option value="unrecorded">No visits yet</option>
+          <option value="attention">Needs attention today</option>
         </select>
         <label className="filter-label">
           Registered
@@ -168,6 +197,13 @@ export default function PatientsPage() {
                     {isBmo && <td>{p.sub_centre_id || <span className="muted">—</span>}</td>}
                     <td>
                       {p.risk_status ? <RiskTag level={p.risk_status} /> : <span className="muted">No visits</span>}
+                      {p.needs_attention && attentionNote(p) && (
+                        <span
+                          className={`attention-note${p.risk_status === "HIGH" ? "" : " tone-medium"}`}
+                        >
+                          {attentionNote(p)}
+                        </span>
+                      )}
                     </td>
                     <td className="n">{p.total_visits}</td>
                     <td>{new Date(p.registered_at).toLocaleDateString()}</td>

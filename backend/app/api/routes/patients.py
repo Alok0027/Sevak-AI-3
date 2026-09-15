@@ -1,6 +1,12 @@
 """GET /api/v1/patients/{worker_id} (FR-07.2: patient list with risk badges)
-and GET /api/v1/patients/{patient_id}/history (full visit timeline)."""
+and GET /api/v1/patients/{patient_id}/history (full visit timeline).
+
+Both list endpoints return patients in triage order rather than whatever
+the database hands back -- see app/services/patient_priority.py for why
+order carries more of the signal here than colour does.
+"""
 import json
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
@@ -8,6 +14,7 @@ from sqlalchemy.orm import aliased
 
 from app.api.deps import DbSession, get_supervisor_scope, require_roles
 from app.core.config import get_settings
+from app.db.models.action import Action
 from app.db.models.patient import Patient
 from app.db.models.risk_flag import RiskFlag
 from app.db.models.visit import Visit
@@ -22,7 +29,7 @@ from app.schemas.patient import (
     PatientVoiceIntakeResponse,
 )
 from app.schemas.worker import PatientHistoryEntry, PatientHistoryResponse
-from app.services import patient_intake
+from app.services import patient_intake, patient_priority
 from app.services.llm_client import get_llm_client
 from app.services.audit import record as audit_record
 from app.services.bhashini_client import get_bhashini_client
@@ -33,6 +40,41 @@ from app.services.bhashini_client import get_bhashini_client
 OverridingWorker = aliased(Worker)
 
 router = APIRouter(prefix="/api/v1/patients", tags=["patients"])
+
+
+def _open_followups(db, patient_ids: list[str]) -> dict[str, tuple[int, datetime | None]]:
+    """patient_id -> (how many follow-ups are still open, the earliest deadline).
+
+    Earliest, not latest. A mother with one follow-up two days late and
+    another due next week is two days late; taking the later date would
+    quietly retire the lapse, which is the one thing this whole ranking
+    exists to surface.
+
+    One grouped query rather than one per patient: an ANM's district view
+    is several hundred rows, and a per-row round trip would make opening
+    the page slower than the thing it is trying to save her.
+    """
+    if not patient_ids:
+        return {}
+    rows = (
+        db.query(
+            Visit.patient_id,
+            func.count(Action.action_id),
+            func.min(Action.due_at),
+        )
+        .join(Action, Action.visit_id == Visit.visit_id)
+        .filter(
+            Visit.patient_id.in_(patient_ids),
+            Action.type == "followup",
+            # The same definition of "still owed" the task board uses
+            # (routes/tasks.py). A done or cancelled follow-up is not a
+            # debt, however late its date has since become.
+            Action.status == "pending",
+        )
+        .group_by(Visit.patient_id)
+        .all()
+    )
+    return {patient_id: (count, earliest) for patient_id, count, earliest in rows}
 
 
 @router.post("/voice-intake", response_model=PatientVoiceIntakeResponse)
@@ -138,24 +180,42 @@ def list_all_patients(
         ):
             last_visit_by_patient.setdefault(v.patient_id, v)
 
-    entries = [
-        PatientDirectoryEntry(
+    followups = _open_followups(db, patient_ids)
+
+    def _entry(p: Patient, w: Worker) -> PatientDirectoryEntry:
+        last = last_visit_by_patient.get(p.patient_id)
+        open_count, next_due = followups.get(p.patient_id, (0, None))
+        priority = patient_priority.assess(
+            last.risk_level if last else None, next_due, has_open_followup=open_count > 0
+        )
+        return PatientDirectoryEntry(
             id=p.patient_id,
             name=p.name,
             age=p.age,
             gender=p.gender,
             village=p.village,
             pregnancy_stage=p.pregnancy_stage,
-            risk_status=last_visit_by_patient[p.patient_id].risk_level if p.patient_id in last_visit_by_patient else None,
-            last_visit=last_visit_by_patient[p.patient_id].created_at if p.patient_id in last_visit_by_patient else None,
+            risk_status=last.risk_level if last else None,
+            last_visit=last.created_at if last else None,
             total_visits=visit_counts.get(p.patient_id, 0),
             registered_at=p.created_at,
             worker_id=w.worker_id,
             worker_name=w.name,
             sub_centre_id=w.sub_centre_id,
+            priority_score=priority.score,
+            needs_attention=priority.needs_attention,
+            attention_reason=priority.reason,
+            hours_overdue=priority.hours_overdue,
+            open_followups=open_count,
+            next_followup_due=next_due,
         )
-        for p, w in rows
-    ]
+
+    entries = [_entry(p, w) for p, w in rows]
+    # Same order the ASHA sees. The page is sortable by every column, so
+    # this is only the default -- but a default is what a supervisor
+    # opening the page at 9am actually reads, and "newest registration
+    # first" answered a question nobody was asking.
+    entries.sort(key=lambda e: (-e.priority_score, e.name.lower()))
     audit_record(
         db,
         user_id=user.worker_id,
@@ -163,7 +223,10 @@ def list_all_patients(
         record_type="patient",
         details={"sub_centre_id": effective_sub_centre, "result_count": len(entries)},
     )
-    return PatientDirectoryResponse(patients=entries)
+    return PatientDirectoryResponse(
+        patients=entries,
+        attention_count=sum(1 for e in entries if e.needs_attention),
+    )
 
 
 @router.get("/{worker_id}", response_model=PatientListResponse)
@@ -180,6 +243,8 @@ def list_patients(
         .all()
     ) if patients else {}
 
+    followups = _open_followups(db, [p.patient_id for p in patients])
+
     summaries = []
     for p in patients:
         last_visit = (
@@ -188,6 +253,11 @@ def list_patients(
             .order_by(Visit.created_at.desc())
             .first()
         )
+        risk = last_visit.risk_level if last_visit else None
+        open_count, next_due = followups.get(p.patient_id, (0, None))
+        priority = patient_priority.assess(
+            risk, next_due, has_open_followup=open_count > 0
+        )
         summaries.append(
             PatientSummary(
                 id=p.patient_id,
@@ -195,12 +265,27 @@ def list_patients(
                 age=p.age,
                 village=p.village,
                 pregnancy_stage=p.pregnancy_stage,
-                risk_status=last_visit.risk_level if last_visit else None,
+                risk_status=risk,
                 last_visit=last_visit.created_at if last_visit else None,
                 total_visits=visit_counts.get(p.patient_id, 0),
+                priority_score=priority.score,
+                needs_attention=priority.needs_attention,
+                attention_reason=priority.reason,
+                hours_overdue=priority.hours_overdue,
+                open_followups=open_count,
+                next_followup_due=next_due,
             )
         )
-    return PatientListResponse(patients=summaries)
+
+    # Worst first, then longest-waiting. The name tiebreak is not cosmetic:
+    # without it two patients on the same score can swap places between
+    # refreshes, and a list that reorders under an ASHA's thumb is a list
+    # she stops trusting.
+    summaries.sort(key=lambda s: (-s.priority_score, s.name.lower()))
+    return PatientListResponse(
+        patients=summaries,
+        attention_count=sum(1 for s in summaries if s.needs_attention),
+    )
 
 
 @router.get("/{patient_id}/history", response_model=PatientHistoryResponse)

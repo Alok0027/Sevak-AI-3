@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import aliased
 
-from app.api.deps import DbSession, require_roles
+from app.api.deps import DbSession, get_supervisor_scope, require_roles
 from app.core.security import hash_pin
 from app.db.models.audit_log import AuditLog
 from app.db.models.worker import Worker
@@ -88,23 +88,82 @@ def list_staff(
     )
 
 
+def _guard_decision(db, user, worker: Worker) -> None:
+    """May this person decide about this registration?
+
+    An ANM may admit her own ASHAs and nobody else's. She is the one who
+    actually knows whether a woman claiming to be the ASHA for Wagholi is
+    the ASHA for Wagholi -- she works with her -- and routing that through
+    a district admin who has never met her turns a check into a rubber
+    stamp performed a week late.
+
+    What she may not do is promote: approving an ANM or a BMO stays with
+    the admin, because an ANM who could admit another ANM into a
+    neighbouring sub-centre has effectively granted herself the district.
+    """
+    if user.role == "admin":
+        return
+
+    scope = get_supervisor_scope(user, db)  # her sub_centre_id
+    if worker.role != "asha":
+        raise HTTPException(
+            status_code=403,
+            detail="Only an administrator can approve a supervisor account",
+        )
+    if scope is None or worker.sub_centre_id != scope:
+        # Same wording whether the sub-centre is wrong or simply absent:
+        # the reply to "may I decide about this worker" should not double
+        # as a way of mapping which sub-centre a stranger registered under.
+        raise HTTPException(
+            status_code=403,
+            detail="This registration is outside your sub-centre",
+        )
+
+
+@router.get("/registrations", response_model=StaffListResponse)
+def list_registrations(
+    db: DbSession,
+    user=Depends(require_roles("admin", "anm")),
+) -> StaffListResponse:
+    """Everyone waiting to be let in.
+
+    Separate from /staff, which is the whole district and admin-only. An
+    ANM has no business reading the district's staff directory, but she
+    does need to see the women waiting to start work under her -- so this
+    returns pending rows only, scoped to her sub-centre.
+    """
+    query = db.query(Worker).filter(Worker.status == "pending")
+    if user.role != "admin":
+        scope = get_supervisor_scope(user, db)
+        query = query.filter(Worker.role == "asha", Worker.sub_centre_id == scope)
+
+    # Oldest first. A queue that puts the newest arrival on top is a queue
+    # where the person who has been waiting longest is the last one seen.
+    workers = query.order_by(Worker.created_at.asc()).all()
+    return StaffListResponse(
+        staff=[_to_staff(w, {}) for w in workers],
+        pending_count=len(workers),
+    )
+
+
 @router.post("/staff/{worker_id}/approve", response_model=StaffMember)
 def approve_registration(
     worker_id: str,
     db: DbSession,
     payload: RegistrationDecisionRequest | None = None,
-    user=Depends(require_roles("admin")),
+    user=Depends(require_roles("admin", "anm")),
 ) -> StaffMember:
     """Let a registered worker in.
 
-    This is the human check the whole registration flow exists for. The
-    admin should have rung the number on the row before clicking. The
-    system cannot verify that she did -- which is exactly why the decision
-    is recorded against her name rather than happening on its own.
+    This is the human check the whole registration flow exists for. Whoever
+    clicks should have rung the number on the row first. The system cannot
+    verify that they did -- which is exactly why the decision is recorded
+    against their name rather than happening on its own.
     """
     worker = db.query(Worker).filter(Worker.worker_id == worker_id).first()
     if worker is None:
         raise HTTPException(status_code=404, detail="Worker not found")
+    _guard_decision(db, user, worker)
     if worker.status == "active":
         raise HTTPException(status_code=400, detail="This account is already active")
 
@@ -134,7 +193,7 @@ def reject_registration(
     worker_id: str,
     payload: RegistrationDecisionRequest,
     db: DbSession,
-    user=Depends(require_roles("admin")),
+    user=Depends(require_roles("admin", "anm")),
 ) -> StaffMember:
     """Turn a registration down, with a reason.
 
@@ -149,6 +208,7 @@ def reject_registration(
     worker = db.query(Worker).filter(Worker.worker_id == worker_id).first()
     if worker is None:
         raise HTTPException(status_code=404, detail="Worker not found")
+    _guard_decision(db, user, worker)
     if worker.role == "admin":
         raise HTTPException(status_code=400, detail="Admin accounts cannot be rejected here")
     if worker.status == "rejected":

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { approveStaff, createStaff, fetchAuditLog, fetchStaff, rejectStaff } from "../api/client";
+import { createStaff, fetchAuditLog, fetchStaff } from "../api/client";
+import RegistrationQueue from "../components/RegistrationQueue";
 import { useSortableData } from "../hooks/useSortableData";
 import AppShell from "../components/AppShell";
 import { Empty, Section } from "../components/Surface";
@@ -39,7 +40,6 @@ export default function AdminPage() {
   const [staff, setStaff] = useState([]);
   const [staffLoading, setStaffLoading] = useState(true);
   const [staffError, setStaffError] = useState(null);
-  const [deciding, setDeciding] = useState(null);
 
   const [form, setForm] = useState(EMPTY_FORM);
   const [formError, setFormError] = useState(null);
@@ -112,34 +112,6 @@ export default function AdminPage() {
     requestSort: requestStaffSort,
   } = useSortableData(staff, "role", "asc");
 
-  const pending = staff.filter((s) => s.status === "pending");
-
-  // A worker registered in the app and cannot sign in until somebody here
-  // decides. Approving is not paperwork -- it is the last step of her
-  // onboarding, and every hour it sits here is an hour she cannot work.
-  async function decide(worker, approve) {
-    const reason = approve
-      ? window.prompt(`Approve ${worker.name}? Add a note (optional) — e.g. who you rang to check.`) ?? ""
-      : window.prompt(`Reject ${worker.name}? Give a reason (required, at least 5 characters).`);
-    if (!approve && (!reason || reason.trim().length < 5)) return;
-
-    setDeciding(worker.worker_id);
-    setStaffError(null);
-    try {
-      if (approve) {
-        await approveStaff(worker.worker_id, reason.trim() || null);
-      } else {
-        await rejectStaff(worker.worker_id, reason.trim());
-      }
-      loadStaff();
-      loadAudit();
-    } catch (err) {
-      setStaffError(err.response?.data?.detail || "Could not save that decision");
-    } finally {
-      setDeciding(null);
-    }
-  }
-
   return (
     <AppShell
       title="Administration"
@@ -148,68 +120,7 @@ export default function AdminPage() {
     >
       {staffError && <p className="error">{staffError}</p>}
 
-      <Section
-        title="Waiting for approval"
-        sub="Workers who registered in the app. None of them can sign in until you decide. Ring the number before you approve — the system cannot check that she is who she says she is, only record that you did."
-        aside={<span className="chip">{pending.length} waiting</span>}
-      >
-        {pending.length === 0 ? (
-          <Empty>Nobody is waiting. New registrations from the app appear here.</Empty>
-        ) : (
-          <div className="table-wrap">
-            <div className="table-scroll">
-              <table className="data">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Role</th>
-                    <th>Phone</th>
-                    <th>Sub-centre</th>
-                    <th>Registered</th>
-                    <th>Decision</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pending.map((s) => (
-                    <tr key={s.worker_id}>
-                      <td>
-                        <div className="cell-with-avatar">
-                          <span className="avatar">{initials(s.name)}</span>
-                          <span className="cell-strong">{s.name}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <span className="chip">{ROLE_LABELS[s.role] || s.role}</span>
-                      </td>
-                      <td>
-                        <a href={`tel:${s.phone}`}>{s.phone}</a>
-                      </td>
-                      <td>{s.sub_centre_id || <span className="muted">—</span>}</td>
-                      <td className="muted">{new Date(s.created_at).toLocaleDateString()}</td>
-                      <td>
-                        <button
-                          className="btn-quiet"
-                          disabled={deciding === s.worker_id}
-                          onClick={() => decide(s, true)}
-                        >
-                          Approve
-                        </button>
-                        <button
-                          className="btn-quiet"
-                          disabled={deciding === s.worker_id}
-                          onClick={() => decide(s, false)}
-                        >
-                          Reject
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </Section>
+      <RegistrationQueue onChange={loadStaff} />
 
       <Section
         title="Staff directory"

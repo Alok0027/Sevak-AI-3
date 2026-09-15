@@ -409,6 +409,24 @@
   font-weight: 500;
 }
 
+/* Why a row is in today's work, set under the severity it already shows.
+   Severity and urgency are different facts: a HIGH seen this morning is
+   not overdue, and a MEDIUM five days past her follow-up is. The tag says
+   how ill, this says how late, and neither is repeated as a badge
+   elsewhere in the row -- the rail is already carrying the colour. */
+.attention-note {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--risk-high);
+}
+
+.attention-note.tone-medium {
+  color: var(--risk-medium);
+}
+
 /* Not a severity. LOW is deliberately quiet because a settled patient
    should not compete for attention; this is the opposite case -- a row
    where the system knows nothing -- so it has to outrank LOW visually

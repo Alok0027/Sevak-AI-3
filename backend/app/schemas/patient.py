@@ -23,7 +23,29 @@ class PatientCreate(BaseModel):
     blood_sugar_random: int | None = None
 
 
-class PatientSummary(BaseModel):
+class TriageFields(BaseModel):
+    """What every list needs in order to put the right person first.
+
+    Computed server-side by app/services/patient_priority.py and shared by
+    the ASHA's list, the ANM's sub-centre view and the BMO's district
+    table, so a supervisor and the worker she supervises can never be
+    looking at differently-ordered copies of the same ward.
+
+    [attention_reason] is a key, not a sentence. The app says it in six
+    languages and the dashboard says it in English; neither should be
+    re-translating a phrase the server invented.
+    """
+
+    # Higher is sooner. Only meaningful as a comparison -- never shown.
+    priority_score: int = 0
+    needs_attention: bool = False
+    attention_reason: str | None = None  # high_risk | overdue | due_today
+    hours_overdue: int = 0
+    open_followups: int = 0
+    next_followup_due: datetime | None = None
+
+
+class PatientSummary(TriageFields):
     id: str
     name: str
     age: int | None = None
@@ -36,9 +58,13 @@ class PatientSummary(BaseModel):
 
 class PatientListResponse(BaseModel):
     patients: list[PatientSummary]
+    # So a list can head itself "3 need attention today" without counting
+    # client-side -- and so a caller that pages this later still gets the
+    # true total rather than the count of whatever fitted on page one.
+    attention_count: int = 0
 
 
-class PatientDirectoryEntry(BaseModel):
+class PatientDirectoryEntry(TriageFields):
     """One row in the ANM/BMO cross-worker patient directory (FR-08 drill-
     down) -- unlike PatientSummary, which is one ASHA's own patient list,
     this spans every ASHA in scope, so it also carries gender (a filter
@@ -61,6 +87,7 @@ class PatientDirectoryEntry(BaseModel):
 
 class PatientDirectoryResponse(BaseModel):
     patients: list[PatientDirectoryEntry]
+    attention_count: int = 0
 
 
 class PatientVoiceIntakeRequest(BaseModel):

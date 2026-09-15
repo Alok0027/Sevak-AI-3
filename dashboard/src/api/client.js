@@ -125,6 +125,14 @@ export async function fetchStaff({ role, status } = {}) {
   return Object.assign(data.staff, { pendingCount: data.pending_count ?? 0 });
 }
 
+// Pending registrations, scoped by the backend: an ANM sees the ASHAs who
+// named her sub-centre, an admin sees everyone. Separate from fetchStaff,
+// which is the whole district staff directory and stays admin-only.
+export async function fetchRegistrations() {
+  const { data } = await client.get("/api/v1/admin/registrations");
+  return data.staff;
+}
+
 // A worker who registered in the app is waiting on one of these two calls.
 // Until an admin makes the decision she cannot sign in at all, so this is
 // not an administrative nicety -- it is the last step of her onboarding.

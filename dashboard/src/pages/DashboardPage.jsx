@@ -17,6 +17,7 @@ import WorkerLeaderboardChart from "../components/WorkerLeaderboardChart";
 import WorkerRoster from "../components/WorkerRoster";
 import EscalationList from "../components/EscalationList";
 import FollowupCompliance from "../components/FollowupCompliance";
+import RegistrationQueue from "../components/RegistrationQueue";
 
 const POLL_INTERVAL_MS = 60_000;
 
@@ -111,6 +112,17 @@ export default function DashboardPage() {
           ]}
         />
       )}
+
+      {/* An ANM only. A BMO has read-only access to individual records
+          (SRS table 4), so the queue would be a panel of buttons she is
+          not allowed to press, and an admin has the same queue on the
+          admin panel where the rest of staff management lives.
+
+          Collapses entirely when nobody is waiting: this page is about
+          patients, and a permanent "nobody is waiting" panel above her
+          escalations would tax the one screen meant to surface urgent
+          things, every day, to say nothing happened. */}
+      {auth?.role === "anm" && <RegistrationQueue collapseWhenEmpty onChange={refresh} />}
 
       <Section
         title="Visit accountability"
