@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { apiConfigProblem } from "../api/client";
 
 export default function LoginPage() {
   const [phone, setPhone] = useState("9999999901"); // demo ANM account
@@ -18,7 +19,9 @@ export default function LoginPage() {
       await login(phone, pin);
       navigate("/");
     } catch (err) {
-      setError(err.response?.data?.detail || "Login failed");
+      // err.message carries the configuration problem when there is one;
+      // "Login failed" is only honest when the server actually answered.
+      setError(err.response?.data?.detail || err.message || "Login failed");
     } finally {
       setLoading(false);
     }
@@ -35,6 +38,10 @@ export default function LoginPage() {
           <h1>SevakAI</h1>
         </div>
         <p className="subtitle">District health supervision</p>
+
+        {/* Shown before she types anything: if the build cannot reach an
+            API at all, every PIN she tries will look wrong. */}
+        {apiConfigProblem && <p className="error">{apiConfigProblem}</p>}
 
         {new URLSearchParams(window.location.search).has("expired") && (
           <p className="notice">Your session timed out after 8 hours. Sign in to pick up where you left off.</p>

@@ -2,9 +2,54 @@ import axios from "axios";
 
 // FR-08.3: dashboard must work on any modern browser without installation --
 // plain REST calls to the FastAPI backend, no build-time coupling beyond this.
-const baseURL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+const configured = (import.meta.env.VITE_API_BASE_URL || "").trim();
 
-const client = axios.create({ baseURL });
+// The localhost default is a *development* convenience and nothing else.
+//
+// It used to apply to production builds too, and that quietly cost hours.
+// A deployed dashboard with no VITE_API_BASE_URL falls back to calling
+// http://localhost:8000 -- the viewer's own laptop. On an https origin the
+// browser refuses that as mixed content and never sends the request at
+// all, so the Network tab is empty, the console says nothing useful, and
+// the screen says "Login failed" as though the PIN were wrong.
+//
+// A deployment that has not been told where its API is should say so, in
+// those words, on the screen where somebody is trying to sign in.
+export const apiBaseUrl = configured || (import.meta.env.DEV ? "http://localhost:8000" : "");
+
+/** A sentence to put on the login screen, or null when the config is fine. */
+export const apiConfigProblem = (() => {
+  if (!configured && !import.meta.env.DEV) {
+    return (
+      "This build was not told where the API is. Set VITE_API_BASE_URL in the " +
+      "hosting project's environment variables and redeploy. Note that a variable " +
+      "scoped to Production only does not apply to a preview deployment."
+    );
+  }
+  // Same failure, different cause: an https page cannot call an http API,
+  // and the browser blocks it before a request exists to debug.
+  if (
+    configured.startsWith("http://") &&
+    typeof window !== "undefined" &&
+    window.location.protocol === "https:"
+  ) {
+    return (
+      `This page is served over https but VITE_API_BASE_URL is ${configured}. ` +
+      "The browser blocks that as mixed content, so the request is never sent. " +
+      "Use an https API address."
+    );
+  }
+  return null;
+})();
+
+const client = axios.create({ baseURL: apiBaseUrl });
+
+// Fail with the real reason rather than letting axios attempt a call that
+// cannot work and reporting it as a generic network error.
+client.interceptors.request.use((config) => {
+  if (apiConfigProblem) return Promise.reject(new Error(apiConfigProblem));
+  return config;
+});
 
 client.interceptors.request.use((config) => {
   const token = localStorage.getItem("sevakai_token");
