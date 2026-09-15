@@ -111,10 +111,19 @@ def test_nobody_can_register_as_an_admin():
         assert resp.status_code == 422, resp.text
 
 
-def test_only_an_admin_can_approve():
+def test_approving_is_not_open_to_everyone():
+    """An ASHA cannot admit herself or a colleague, and a BMO has
+    read-only access to individual records (SRS table 4).
+
+    An ANM is deliberately absent from this list: she approves the ASHAs
+    in her own sub-centre, which is the point of
+    tests/test_anm_approves_her_own_ashas.py. She is the person who
+    actually knows whether a woman claiming to be the ASHA for Wagholi is
+    the ASHA for Wagholi.
+    """
     with _client() as client:
         registered = _register(client, "9800000006").json()
-        for phone in ("9999999999", "9999999901", "9999999902"):  # ASHA, ANM, BMO
+        for phone in ("9999999999", "9999999902"):  # ASHA, BMO
             resp = client.post(
                 f"/api/v1/admin/staff/{registered['worker_id']}/approve",
                 headers=_headers(client, phone),

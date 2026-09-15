@@ -303,6 +303,14 @@ class AppStrings {
     'waitingForApproval': 'Your registration is still waiting for approval. Ring your block office if it has been more than a day.',
     'phoneAlreadyRegistered': 'An account already exists for this number. Try signing in.',
     'saveChange': 'Save',
+
+    // Triage order: who to see first
+    'needsAttentionToday': 'Needs attention today',
+    'everyoneElse': 'Everyone else',
+    'overdueHours': '{n}h overdue',
+    'overdueDays': '{n}d overdue',
+    'dueTodayShort': 'Due today',
+    'highRiskShort': 'High risk',
   };
 
   static const _hi = <String, String>{
@@ -542,6 +550,14 @@ class AppStrings {
     'waitingForApproval': 'आपका पंजीकरण अभी मंज़ूरी का इंतज़ार कर रहा है। एक दिन से ज़्यादा हो गया हो तो ब्लॉक कार्यालय को फ़ोन करें।',
     'phoneAlreadyRegistered': 'इस नंबर के लिए खाता पहले से है। लॉग इन करके देखें।',
     'saveChange': 'सहेजें',
+
+    // Triage order: who to see first
+    'needsAttentionToday': 'आज ध्यान चाहिए',
+    'everyoneElse': 'बाक़ी सब',
+    'overdueHours': '{n} घंटे देर',
+    'overdueDays': '{n} दिन देर',
+    'dueTodayShort': 'आज देय',
+    'highRiskShort': 'उच्च जोखिम',
   };
 
   static const _mr = <String, String>{
@@ -781,6 +797,14 @@ class AppStrings {
     'waitingForApproval': 'तुमची नोंदणी अजून मंजुरीच्या प्रतीक्षेत आहे. एक दिवसापेक्षा जास्त झाले असेल तर ब्लॉक कार्यालयाला फोन करा.',
     'phoneAlreadyRegistered': 'या नंबरसाठी खाते आधीच आहे. लॉगिन करून पहा.',
     'saveChange': 'जतन करा',
+
+    // Triage order: who to see first
+    'needsAttentionToday': 'आज लक्ष हवे',
+    'everyoneElse': 'बाकी सर्व',
+    'overdueHours': '{n} तास उशीर',
+    'overdueDays': '{n} दिवस उशीर',
+    'dueTodayShort': 'आज देय',
+    'highRiskShort': 'उच्च जोखीम',
   };
 
   static const _ta = <String, String>{
@@ -1020,6 +1044,14 @@ class AppStrings {
     'waitingForApproval': 'உங்கள் பதிவு இன்னும் ஒப்புதலுக்குக் காத்திருக்கிறது. ஒரு நாளுக்கு மேல் ஆகியிருந்தால் வட்டார அலுவலகத்தை அழையுங்கள்.',
     'phoneAlreadyRegistered': 'இந்த எண்ணுக்கு ஏற்கனவே கணக்கு உள்ளது. உள்நுழைந்து பாருங்கள்.',
     'saveChange': 'சேமி',
+
+    // Triage order: who to see first
+    'needsAttentionToday': 'இன்று கவனம் தேவை',
+    'everyoneElse': 'மற்ற அனைவரும்',
+    'overdueHours': '{n} மணி தாமதம்',
+    'overdueDays': '{n} நாள் தாமதம்',
+    'dueTodayShort': 'இன்று வேண்டும்',
+    'highRiskShort': 'அதிக ஆபத்து',
   };
 
   static const _te = <String, String>{
@@ -1259,6 +1291,14 @@ class AppStrings {
     'waitingForApproval': 'మీ నమోదు ఇంకా ఆమోదం కోసం వేచి ఉంది. ఒక రోజు కంటే ఎక్కువైతే బ్లాక్ కార్యాలయానికి ఫోన్ చేయండి.',
     'phoneAlreadyRegistered': 'ఈ నంబర్‌కు ఇప్పటికే ఖాతా ఉంది. సైన్ ఇన్ చేసి చూడండి.',
     'saveChange': 'సేవ్ చేయి',
+
+    // Triage order: who to see first
+    'needsAttentionToday': 'ఈరోజు శ్రద్ధ కావాలి',
+    'everyoneElse': 'మిగిలిన అందరూ',
+    'overdueHours': '{n} గంటలు ఆలస్యం',
+    'overdueDays': '{n} రోజులు ఆలస్యం',
+    'dueTodayShort': 'ఈరోజు గడువు',
+    'highRiskShort': 'అధిక ప్రమాదం',
   };
 
   static const _bn = <String, String>{
@@ -1498,6 +1538,14 @@ class AppStrings {
     'waitingForApproval': 'আপনার নিবন্ধন এখনও অনুমোদনের অপেক্ষায়। একদিনের বেশি হলে ব্লক অফিসে ফোন করুন।',
     'phoneAlreadyRegistered': 'এই নম্বরে ইতিমধ্যে অ্যাকাউন্ট আছে। সাইন ইন করে দেখুন।',
     'saveChange': 'সংরক্ষণ করুন',
+
+    // Triage order: who to see first
+    'needsAttentionToday': 'আজ মনোযোগ দরকার',
+    'everyoneElse': 'বাকি সবাই',
+    'overdueHours': '{n} ঘণ্টা দেরি',
+    'overdueDays': '{n} দিন দেরি',
+    'dueTodayShort': 'আজ দেয়',
+    'highRiskShort': 'উচ্চ ঝুঁকি',
   };
 }
 
