@@ -68,6 +68,18 @@ class ExtractedFields(BaseModel):
     # the score while these escalate outright -- an ASHA describing an
     # assault is reporting an emergency, not a background stressor.
     violence_or_injury: list[str] = []
+    # Danger signs from NHM antenatal care's immediate-referral list, e.g.
+    # ["Severe headache, with or without blurred vision"]. A separate field
+    # rather than free-text symptoms, and separate from social_risk_factors,
+    # for the same reason violence_or_injury is separate: these escalate
+    # outright instead of nudging a score.
+    #
+    # It exists because nothing captured them before. An ASHA saying "sir
+    # mein tez dard aur dhundla dikh raha hai" had those words dropped by
+    # Agent 1, so the classifier scored her normal BP and answered LOW,
+    # over the words "no abnormal findings recorded". The corpus calls
+    # these the presenting signs of imminent eclampsia.
+    danger_signs: list[str] = []
     pregnancy_stage: str | None = None
     medication_compliance: str | None = None  # compliant | non_compliant | unknown
     medication_compliance_detail: str | None = None

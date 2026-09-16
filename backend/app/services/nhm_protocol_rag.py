@@ -46,6 +46,25 @@ HIGH_RANDOM_SUGAR = 200
 ELEVATED_RANDOM_SUGAR = 140
 
 
+# Danger signs arrive already identified, in extracted.danger_signs --
+# Agent 1 matches them against the transcript (see _DANGER_SIGN_RULES
+# there), because this module only ever sees extracted fields and the
+# words are in the speech.
+#
+# The corpus is explicit that they stand on their own:
+# nhm_corpus/antenatal_care.md, "Danger signs in pregnancy requiring
+# immediate referral" -- "Severe headache with blurred vision, and
+# convulsions, sit in this list because they are the presenting signs of
+# imminent eclampsia -- they are urgent whatever the blood pressure
+# reading happens to be."
+#
+# That sentence is why any of this exists. Nothing captured these at all
+# before: ExtractedFields had no field for a reported symptom, so a
+# report of severe headache with blurred vision alongside a normal BP
+# came back LOW, over the words "no abnormal findings recorded". Not a
+# miss -- an assurance. Found by tests/test_risk_conformance.py.
+
+
 # A visit the classifier could not score at all. Distinct from LOW on
 # purpose: LOW is a finding ("I read her vitals and they are normal"),
 # this is the absence of one ("nothing came through"). Collapsing the two
@@ -77,6 +96,11 @@ def has_clinical_signal(extracted: ExtractedFields) -> bool:
         extracted.medication_compliance in ("compliant", "non_compliant"),
         bool(extracted.violence_or_injury),
         bool(extracted.social_risk_factors),
+        # What she reported is an observation too. Without this line a
+        # visit whose only content was "severe headache and blurred
+        # vision" came back UNASSESSED -- the danger sign discarded and
+        # the ASHA asked to record the visit again.
+        bool(extracted.danger_signs),
     ))
 
 
@@ -106,6 +130,21 @@ class NHMProtocolKnowledgeBase:
 
         drivers: list[RiskDriver] = []
         score = 0.0
+
+        # First, and on their own terms. The corpus puts these on the
+        # immediate-referral list and says they are urgent "whatever the
+        # blood pressure reading happens to be", so a normal BP measured
+        # on the same visit must not be allowed to average them away.
+        for sign in extracted.danger_signs:
+            drivers.append(RiskDriver(
+                observation=f"Reported: {sign}",
+                reason=(
+                    "NHM antenatal care lists this under danger signs requiring "
+                    "immediate referral to a first referral unit. These signs are "
+                    "urgent whatever the blood pressure reading happens to be."
+                ),
+            ))
+            score += 1.0
 
         if extracted.bp_systolic and extracted.bp_diastolic:
             bp = f"{extracted.bp_systolic}/{extracted.bp_diastolic}"

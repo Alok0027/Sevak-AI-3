@@ -106,6 +106,53 @@ _SOCIAL_RISK_RULES = [
 ]
 
 
+# nhm_corpus/antenatal_care.md, "Danger signs in pregnancy requiring
+# immediate referral". Matched here rather than left to the classifier,
+# because the classifier only ever sees extracted fields -- and until this
+# existed, these words never became one.
+#
+# Hindi and Devanagari alongside English throughout: the ASHA dictates in
+# her own language, and an English-only pattern would catch the danger
+# sign only for the workers least likely to need the help.
+_DANGER_SIGN_RULES = [
+    (
+        re.compile(r"severe\s+headache|tez\s+(sir\s*)?dard|sir\s+(mein\s+)?dard|"
+                   r"सिर\s*(में)?\s*(तेज़?\s*)?दर्द", re.IGNORECASE),
+        "Severe headache, with or without blurred vision",
+    ),
+    (
+        re.compile(r"blurr?(ed|y)\s+vision|dhundla|dikhai\s+nahi|धुंधला|दिखाई\s*नहीं",
+                   re.IGNORECASE),
+        "Blurred vision",
+    ),
+    (
+        re.compile(r"convuls|seizure|fits?\b|unconscious|behosh|daura|दौरा|बेहोश",
+                   re.IGNORECASE),
+        "Convulsions or loss of consciousness",
+    ),
+    (
+        re.compile(r"bleeding|blood\s+loss|khoon\s*(aa|beh)|रक्तस्राव|खून\s*आ",
+                   re.IGNORECASE),
+        "Bleeding during pregnancy",
+    ),
+    (
+        re.compile(r"severe\s+abdominal\s+pain|continuous\s+abdominal|pet\s+(mein\s+)?tez\s+dard|"
+                   r"पेट\s*(में)?\s*तेज़?\s*दर्द", re.IGNORECASE),
+        "Continuous severe abdominal pain",
+    ),
+    (
+        re.compile(r"water\s+broke|rupture[d]?\s+membrane|leaking\s+(water|fluid)|"
+                   r"पानी\s*(की\s*)?थैली", re.IGNORECASE),
+        "Rupture of membranes",
+    ),
+    (
+        re.compile(r"preterm|premature\s+labou?r|early\s+labou?r|समय\s*से\s*पहले",
+                   re.IGNORECASE),
+        "Preterm labour",
+    ),
+]
+
+
 def extract(transcript: str) -> ExtractedFields:
     fields = ExtractedFields()
     confidence: dict[str, float] = {}
@@ -167,6 +214,15 @@ def extract(transcript: str) -> ExtractedFields:
     fields.violence_or_injury = violence
     if violence:
         confidence["violence_or_injury"] = 0.75
+
+    danger = [label for pattern, label in _DANGER_SIGN_RULES if pattern.search(transcript)]
+    fields.danger_signs = danger
+    if danger:
+        # Lower than the vitals, higher than nothing. A keyword match on
+        # dictated speech will occasionally fire on "no headache", and the
+        # review screen is where the ASHA corrects that. Erring towards a
+        # needless referral is the right direction to err in.
+        confidence["danger_signs"] = 0.7
 
     fields.confidence_scores = confidence
     return fields
