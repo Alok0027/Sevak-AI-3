@@ -36,9 +36,16 @@ export default function FollowupCompliance({ compliance, showSubCentre }) {
       return next;
     });
 
-  // Default the worst offenders open: a supervisor opening this page
-  // should see the overdue names without clicking anything.
-  const isOpen = (w) => expanded.has(w.worker_id) || (expanded.size === 0 && w.overdue > 0);
+  // Every worker starts closed.
+  //
+  // This used to open the overdue ones automatically, on the reasoning
+  // that a supervisor should see the names without clicking. In practice
+  // the page loaded as six stacked tables and eighty rows, and the one
+  // thing this section is for -- reading down a short list of names and
+  // their counts -- was buried under its own detail. The counts on each
+  // header already say who needs chasing; the table is what you open
+  // once you have decided whose to look at.
+  const isOpen = (w) => expanded.has(w.worker_id);
 
   // Behind first, then by how far behind. Who needs chasing is the point
   // of the section, so it belongs at the top rather than somewhere you
@@ -69,7 +76,7 @@ export default function FollowupCompliance({ compliance, showSubCentre }) {
                 <span className={open ? "caret is-open" : "caret"} aria-hidden="true">
                   ▸
                 </span>
-                <span className="cell-strong">{w.worker_name}</span>
+                <span className="compliance-name">{w.worker_name}</span>
                 {showSubCentre && w.sub_centre_id && <span className="chip">{w.sub_centre_id}</span>}
                 <span className="compliance-counts">
                   {clear ? (
@@ -84,7 +91,18 @@ export default function FollowupCompliance({ compliance, showSubCentre }) {
                 </span>
               </button>
 
-              {open && !clear && (
+              {/* Always mounted, revealed by animating the grid row from
+                  0fr to 1fr. A height transition needs two known heights,
+                  and the height of a table nobody has measured is not one
+                  of them -- which is why the usual version of this does a
+                  JS measure on every toggle. The grid trick animates to
+                  the real content height with no measuring, and without a
+                  guessed max-height that clips a worker with thirty
+                  overdue visits. The rows do exist while collapsed, so
+                  the wrapper is inert rather than merely invisible. */}
+              <div className="compliance-detail-wrap" data-open={open} inert={!open}>
+               <div className="compliance-detail-inner">
+              {!clear && (
                 <div className="compliance-detail">
                   <div className="table-scroll">
                     <table className="data">
@@ -135,11 +153,13 @@ export default function FollowupCompliance({ compliance, showSubCentre }) {
                 </div>
               )}
 
-              {open && clear && (
+              {clear && (
                 <div className="compliance-detail">
                   <p className="compliance-clear">No follow-up visits outstanding for {w.worker_name}.</p>
                 </div>
               )}
+               </div>
+              </div>
             </div>
           );
         })}

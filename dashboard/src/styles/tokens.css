@@ -43,6 +43,14 @@
   --surface: #ffffff;
   --hairline: #e4e9e6;
 
+  /* The hover state for a row or a disclosure: the ink colour at 4.5%,
+     not a tint of the brand green. A hoverable list row is not a brand
+     moment, and --sage on every row the pointer crosses turns the page
+     into a sheet of green flashes. Derived from --ink so it carries the
+     same green cast as every other neutral here, but reads as shading
+     rather than as colour. */
+  --hover-tint: rgba(16, 34, 28, 0.045);
+
   /* ── Risk: instrumentation, not brand ────────────────────────────────
      Low is grey on purpose. A green badge spends attention on the
      patient who needs none; in a triage tool "fine" should be visually

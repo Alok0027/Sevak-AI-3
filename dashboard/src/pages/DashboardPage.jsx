@@ -24,15 +24,19 @@ const POLL_INTERVAL_MS = 60_000;
 
 /* The supervisor's overview -- the same page for an ANM and a BMO, with
  * the backend deciding the scope. Ordered by what they came to find out:
- * the four figures, then who is behind on visits, then the HIGH-risk
- * cases nobody has picked up, then the roster, then the trends.
+ * the four figures and their shape over time, then who is behind on
+ * visits, then the HIGH-risk cases nobody has picked up, then the
+ * roster.
  *
- * That order is deliberate and it is not the order the first version
- * used. Charts first is the dashboard-template instinct; but nothing on
- * this page is as urgent as a mother whose 48-hour follow-up lapsed, and
- * a supervisor who has to scroll past four charts to find her is being
- * shown the decoration before the work. Trends go last, because they are
- * what you read when nothing is on fire. */
+ * Trends sit directly under the four figures rather than at the foot of
+ * the page. They were last for a while, on the argument that nothing
+ * here is as urgent as a mother whose 48-hour follow-up has lapsed and
+ * that a supervisor should not scroll past four charts to find her. What
+ * that missed is that the charts are the same four figures over time --
+ * "27 past due" and the completion chart are one thought, and splitting
+ * them by three sections meant nobody ever read the second half. The
+ * urgent work has not moved down: the accountability table below now
+ * opens closed, so it costs one screen instead of six. */
 export default function DashboardPage() {
   const { auth } = useAuth();
   const isBmo = auth?.role === "bmo" || auth?.role === "admin";
@@ -114,6 +118,33 @@ export default function DashboardPage() {
         />
       )}
 
+      {analytics && (
+        <Section title="Trends" sub="The shape of the four numbers above, over time and across the sub-centre.">
+          <div className="section-grid">
+            <div className="chart-card">
+              <span className="chart-title">Visits logged</span>
+              <span className="chart-sub">Last 14 days</span>
+              <VisitsTrendChart data={analytics.visits_by_day} />
+            </div>
+            <div className="chart-card">
+              <span className="chart-title">Follow-up completion</span>
+              <span className="chart-sub">All tasks ever created</span>
+              <FollowupStatusChart status={analytics.followup_status} />
+            </div>
+            <div className="chart-card">
+              <span className="chart-title">Risk distribution</span>
+              <span className="chart-sub">Every visit classified to date</span>
+              <RiskBreakdownChart breakdown={analytics.risk_breakdown} />
+            </div>
+            <div className="chart-card">
+              <span className="chart-title">Visits by worker</span>
+              <span className="chart-sub">Red marks a worker carrying HIGH-risk cases</span>
+              <WorkerLeaderboardChart leaderboard={analytics.worker_leaderboard} />
+            </div>
+          </div>
+        </Section>
+      )}
+
       {/* An ANM only. A BMO has read-only access to individual records
           (SRS table 4), so the queue would be a panel of buttons she is
           not allowed to press, and an admin has the same queue on the
@@ -154,33 +185,6 @@ export default function DashboardPage() {
       <Section title={isBmo ? "ASHA workers" : "My sub-centre's ASHA workers"}>
         <WorkerRoster workers={workers} showSubCentre={isBmo} />
       </Section>
-
-      {analytics && (
-        <Section title="Trends" sub="The picture behind the numbers above.">
-          <div className="section-grid">
-            <div className="chart-card">
-              <span className="chart-title">Visits logged</span>
-              <span className="chart-sub">Last 14 days</span>
-              <VisitsTrendChart data={analytics.visits_by_day} />
-            </div>
-            <div className="chart-card">
-              <span className="chart-title">Follow-up completion</span>
-              <span className="chart-sub">All tasks ever created</span>
-              <FollowupStatusChart status={analytics.followup_status} />
-            </div>
-            <div className="chart-card">
-              <span className="chart-title">Risk distribution</span>
-              <span className="chart-sub">Every visit classified to date</span>
-              <RiskBreakdownChart breakdown={analytics.risk_breakdown} />
-            </div>
-            <div className="chart-card">
-              <span className="chart-title">Visits by worker</span>
-              <span className="chart-sub">Red marks a worker carrying HIGH-risk cases</span>
-              <WorkerLeaderboardChart leaderboard={analytics.worker_leaderboard} />
-            </div>
-          </div>
-        </Section>
-      )}
     </AppShell>
   );
 }

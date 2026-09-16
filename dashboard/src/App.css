@@ -912,8 +912,37 @@ table.data td.drivers {
   cursor: pointer;
 }
 
-.compliance-head:hover {
+/* :not(:disabled) is load-bearing, not decoration.
+ *
+ * index.css styles every <button> as a primary action and gives it
+ * `button:not(:disabled):hover { background: var(--forest-deep) }`.
+ * That selector scores one element, one pseudo-class and one class,
+ * which outranks a plain `.compliance-head:hover` -- so this disclosure
+ * was turning dark forest green under the pointer, with ink-coloured
+ * text on top of it. Matching the shape the other opt-out buttons here
+ * already use (.btn-quiet, .btn-bare) wins on class count and keeps the
+ * fix in one idiom rather than three. */
+.compliance-head:not(:disabled):hover {
+  background: var(--hover-tint);
+}
+
+/* The open worker's header shares the detail's background, so the header
+   and the table under it read as one block rather than as a heading that
+   happens to sit above a table. */
+.compliance-head[aria-expanded="true"] {
   background: var(--paper);
+}
+
+/* The parent in this list. At 16px against the 13.5px patient rows it is
+   clearly the heading of its group -- which matters because, collapsed,
+   this section is nothing but a column of these names, and open, the
+   name has to stay findable above its own table. Still a step below the
+   17px section title: a worker is not a section. */
+.compliance-name {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
 }
 
 .caret {
@@ -935,8 +964,40 @@ table.data td.drivers {
   flex-wrap: wrap;
 }
 
+/* The open/close animation.
+ *
+ * grid-template-rows going 0fr -> 1fr is the one way to transition to a
+ * content height the browser has not been told in advance. The child has
+ * to carry overflow:hidden and min-height:0, or it refuses to shrink
+ * below its content and the row snaps open instead of sliding.
+ *
+ * 180ms and a standard ease-out: long enough to read as the panel
+ * pushing the rest of the page down rather than the page jumping, short
+ * enough that opening four workers in a row does not feel like waiting. */
+.compliance-detail-wrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 180ms var(--ease);
+}
+
+.compliance-detail-wrap[data-open="true"] {
+  grid-template-rows: 1fr;
+}
+
+.compliance-detail-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Somebody who has asked their system to stop animating things usually
+   means it. The panel still opens, it just arrives. */
+@media (prefers-reduced-motion: reduce) {
+  .compliance-detail-wrap {
+    transition: none;
+  }
+}
+
 .compliance-detail {
-  animation: reveal var(--base) var(--ease);
   border-top: 1px solid var(--hairline);
   background: var(--paper);
 }
@@ -945,17 +1006,6 @@ table.data td.drivers {
   padding: var(--s3) var(--s4) var(--s3) 38px;
   font-size: 13px;
   color: var(--slate);
-}
-
-@keyframes reveal {
-  from {
-    opacity: 0;
-    transform: translateY(-3px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
 }
 
 /* ── Detail pages ────────────────────────────────────────────────────── */
