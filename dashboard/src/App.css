@@ -760,23 +760,36 @@ table.data td.drivers {
   background: var(--surface);
   border: 1px solid var(--hairline);
   border-radius: var(--radius);
-  padding: var(--s4);
+  padding: var(--s6) var(--s4) var(--s4);
   display: flex;
   flex-direction: column;
   gap: var(--s1);
   min-width: 0;
 }
 
+/* The plot takes whatever height is left after the heading, so a card
+   made tall by its neighbour in the grid has its chart grow into the
+   space rather than leaving it white underneath. */
+.chart-card > :last-child {
+  flex: 1;
+  min-height: 0;
+}
+
+/* A card's own heading. It was 13.5px, which is the size of a table
+   cell -- so the four charts were titled in the same voice as the data
+   inside them and read as captions rather than as headings. */
 .chart-title {
-  font-size: 13.5px;
+  font-family: var(--font-display);
+  font-size: 16px;
   font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--ink);
 }
 
 .chart-sub {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--slate);
-  margin-bottom: var(--s2);
+  margin-bottom: var(--s3);
 }
 
 /* Recharts' default tooltip is a white box with a 1px grey border and
@@ -804,22 +817,42 @@ table.data td.drivers {
 /* A labelled proportion bar, replacing the donut. Three numbers do not
    need a pie: a single bar shows the split *and* keeps the counts
    readable, which a donut with a legend never does. */
+/* Follow-up completion.
+ *
+ * Stretched to fill its card rather than sitting in the top corner of
+ * it. The cards in this grid are the height of the tallest one, which is
+ * the 190px trend chart next door, and this component used to stop after
+ * about a third of that and leave the rest white. Space is not made
+ * beautiful by being empty -- it is the bar and the figures that should
+ * be bigger, not the gap under them. */
 .proportion {
   display: flex;
   flex-direction: column;
-  gap: var(--s3);
+  justify-content: center;
+  gap: var(--s6);
+  height: 100%;
+  min-height: 190px;
 }
 
+/* 20px, up from 12. At the old height this was a rule under a heading;
+   at this one it is the chart, which is what it actually is -- the only
+   picture of the split anywhere on the page. */
 .proportion-bar {
   display: flex;
-  height: 12px;
+  gap: 2px;
+  height: 20px;
   border-radius: var(--pill);
   overflow: hidden;
   background: var(--paper);
 }
 
+/* The 2px gap above is drawn in the page background, so each segment
+   keeps its own rounded ends rather than the three of them fusing into
+   one bar with a colour change in the middle. */
 .proportion-seg {
   height: 100%;
+  border-radius: var(--pill);
+  transition: opacity var(--fast) var(--ease);
 }
 
 .proportion-seg.tone-done {
@@ -837,27 +870,31 @@ table.data td.drivers {
 .proportion-keys {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--s4);
+  gap: var(--s8);
 }
 
 .proportion-key {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: var(--s1);
+  border-radius: var(--radius-sm);
+  outline-offset: 4px;
 }
 
 .proportion-key-head {
   display: flex;
   align-items: center;
-  gap: var(--s1);
-  font-size: 12px;
+  gap: var(--s2);
+  font-size: 13.5px;
+  font-weight: 600;
   color: var(--slate);
 }
 
 .proportion-swatch {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
 }
 
 .proportion-swatch.tone-done {
@@ -872,19 +909,100 @@ table.data td.drivers {
   background: var(--risk-high);
 }
 
-.proportion-value {
+/* The swap. Both figures are stacked inside a fixed, clipped box and the
+   pair slides by exactly one figure's height, so the share leaves
+   upwards as the count arrives from below. A crossfade in place was the
+   first attempt and read as a glitch: two numbers of different widths
+   dissolving through each other is illegible for the 180ms it takes. */
+.proportion-figure {
+  position: relative;
+  display: block;
+  height: 30px;
+  overflow: hidden;
+}
+
+.proportion-share,
+.proportion-count {
+  display: block;
+  height: 30px;
   font-family: var(--font-display);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
-  font-size: 18px;
-  line-height: 1.1;
+  font-size: 26px;
+  line-height: 30px;
+  color: var(--ink);
+  transition: transform 200ms var(--ease);
 }
 
-.proportion-pct {
-  font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 500;
+/* Parked one figure-height below the window, so it is clipped until it
+   is wanted. */
+.proportion-count {
+  position: absolute;
+  inset: 0;
+  transform: translateY(30px);
+}
+
+/* The two move in the same direction, not to the same place: the share
+   leaves through the top, the count arrives at rest. Giving both the
+   same -30px -- which is what the first version did -- slides the count
+   straight past the window and out the top with it, and the figure
+   reads as blank for as long as you hover. */
+.proportion-key:hover .proportion-share,
+.proportion-key:focus-visible .proportion-share {
+  transform: translateY(-30px);
+}
+
+.proportion-key:hover .proportion-count,
+.proportion-key:focus-visible .proportion-count {
+  transform: translateY(0);
+}
+
+.proportion-of {
+  font-size: 12.5px;
   color: var(--slate);
+  opacity: 0;
+  transition: opacity 200ms var(--ease);
+}
+
+.proportion-key:hover .proportion-of,
+.proportion-key:focus-visible .proportion-of {
+  opacity: 1;
+}
+
+/* No hover on a touch screen, so nothing may hide behind one. On a
+   phone or a tablet the count sits permanently under the share and the
+   slide never runs. */
+@media (hover: none) {
+  .proportion-figure {
+    height: auto;
+    overflow: visible;
+  }
+
+  .proportion-share,
+  .proportion-count {
+    transform: none !important;
+    transition: none;
+  }
+
+  .proportion-count {
+    position: static;
+    font-size: 15px;
+    color: var(--slate);
+    height: auto;
+    line-height: 1.3;
+  }
+
+  .proportion-of {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .proportion-share,
+  .proportion-count,
+  .proportion-of {
+    transition: none;
+  }
 }
 
 /* ── Compliance (FR-08 visit accountability) ─────────────────────────── */
