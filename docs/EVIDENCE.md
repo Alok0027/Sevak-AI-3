@@ -115,23 +115,36 @@ uncited-number-in-a-table is not.
 
 ## 2. Speech recognition accuracy
 
-**Status: NOT MEASURED.**
+**Status: running on real Bhashini. Accuracy NOT MEASURED.**
 
-- `stt_provider` defaults to `"mock"`, which decodes a base64 payload as
-  UTF-8 and returns it. Deterministic, useful for tests, and not speech
-  recognition.
-- A real local Whisper path (`"whisper"`, faster-whisper) works and has
-  been run against a real Hindi recording.
-- A real Bhashini ULCA client (`"bhashini"`) is implemented as the
-  genuine two-step pipeline call.
+Keep those two apart — they are different claims and only one of them is
+in trouble.
 
-No word error rate has been computed against any reference transcript.
-The SRS's ≥85% accuracy figure is a **target, not a result**, and should
-be labelled as such until a measurement exists.
+**The integration is real.** `backend/.env` sets `STT_PROVIDER=bhashini`
+with a populated `BHASHINI_API_KEY`, `BHASHINI_USER_ID` and
+`BHASHINI_PIPELINE_ID` against `https://meity-auth.ulcacontrib.org`. The
+client performs the genuine two-step ULCA flow — `getModelsPipeline` to
+obtain the ASR `serviceId` and a per-call inference key, then the
+returned `callbackUrl` for the transcript. Two other providers exist
+behind the same interface and are selected by one environment variable:
+local Whisper (`faster-whisper`, no network once weights are cached) and
+a deterministic mock used by the test suite.
 
-To close this: 20–30 clips from several speakers, with accents and
-background noise varied, each with a human reference transcript, and WER
-computed against them.
+An earlier revision of this document said the system "defaults to mock".
+That was read off a stale copy of `.env` and was wrong about the
+deployment. `"mock"` is the *code* default in `config.py`, for tests; the
+configured provider is Bhashini.
+
+**The accuracy figure is what does not exist.** No word error rate has
+been computed against any reference transcript, on any provider. The
+SRS's ≥85% is a **target, not a result**, and must be labelled that way
+until a measurement replaces it.
+
+To close it: 20–30 clips from several speakers — different accents, some
+with background noise, ideally some recorded on a low-end handset rather
+than a laptop — each with a human reference transcript, and WER computed
+against them. This is the single longest-lead item in this document,
+because it needs people, not code.
 
 ---
 
@@ -149,13 +162,23 @@ reported `p95 = 0.00s (PASS)` against a mock STT and a mock LLM — a real
 number for the speed of a base64 decode, and worthless. That figure is
 exactly the kind that walks into a slide.
 
-To produce the number for the deck, on a machine with network:
+A real STT provider is handed the clip as audio, so the script
+**requires `--audio`** when one is configured, and refuses to run
+without it. The default payload is base64 of Hindi text — the mock
+decodes it straight back, and a real provider cannot, so a timing taken
+that way would be the speed of an error rather than a latency.
+
+To produce the number for the deck:
 
 ```bash
 cd backend
-STT_PROVIDER=whisper LLM_PROVIDER=real USE_MOCKS=false \
-  python -m scripts.measure_latency --runs 30
+source .venv/bin/activate
+python -m scripts.measure_latency --runs 30 --audio path/to/clip.m4a
 ```
+
+Use a clip of roughly 60 seconds, because NFR-P2 is written about a 60s
+clip. `.env` already selects Bhashini and a real LLM, so no overrides are
+needed.
 
 NFR-P1 ("<30s end-to-end") and NFR-P2 ("<5s for a 60s clip") remain
 **targets** until that output is pasted here.

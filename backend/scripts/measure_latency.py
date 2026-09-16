@@ -91,13 +91,14 @@ def pct(values: list[float], p: float) -> float:
     return ordered[k]
 
 
-async def one_run(graph, worker_id: str, patient: Patient) -> dict[str, float]:
+async def one_run(graph, worker_id: str, patient: Patient,
+                  audio_b64: str | None = None) -> dict[str, float]:
     state = {
         "worker_id": worker_id,
         "patient_id": patient.patient_id,
         "patient_name": patient.name,
         "patient_phone": patient.phone,
-        "audio_base64": base64.b64encode(SAMPLE_HI.encode()).decode(),
+        "audio_base64": audio_b64 or base64.b64encode(SAMPLE_HI.encode()).decode(),
         "language_code": "hi",
     }
 
@@ -120,9 +121,37 @@ async def one_run(graph, worker_id: str, patient: Patient) -> dict[str, float]:
 async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", type=int, default=30)
+    ap.add_argument("--audio", help=(
+        "Path to a real recording (wav/m4a/mp3/ogg). Required when "
+        "stt_provider is a real one. NFR-P2 is written about a 60s clip, "
+        "so use a clip of about that length to measure the thing the "
+        "requirement actually names."))
     args = ap.parse_args()
 
     settings = get_settings()
+
+    # The default payload is base64 of Hindi *text*. The mock STT decodes
+    # it straight back, which is the whole point of the mock. A real
+    # provider is handed it as audio, cannot decode it, and either throws
+    # or returns nothing -- and a timing taken from a request that failed
+    # is not a latency, it is the speed of an error. So a real provider
+    # requires a real clip.
+    if settings.stt_provider != "mock" and not args.audio:
+        print(f"stt_provider={settings.stt_provider} needs a real recording.")
+        print()
+        print("  python -m scripts.measure_latency --runs 30 --audio path/to/clip.m4a")
+        print()
+        print("Use a clip of roughly 60 seconds: NFR-P2 is written about a 60s")
+        print("clip, and a 3-second one would answer a different question.")
+        return 2
+
+    audio_b64: str | None = None
+    if args.audio:
+        with open(args.audio, "rb") as fh:
+            raw = fh.read()
+        audio_b64 = base64.b64encode(raw).decode()
+        print(f"audio: {args.audio} ({len(raw) / 1024:.0f} KB)")
+
     init_db()
     db = SessionLocal()
     try:
@@ -161,16 +190,17 @@ async def main() -> int:
         print(f"SevakAI pipeline latency — {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC")
         print(f"runs={args.runs}  stt_provider={settings.stt_provider}  "
               f"llm_provider={settings.llm_provider}  use_mocks={settings.use_mocks}")
+        print(f"audio={args.audio or 'synthetic text payload (mock STT only)'}")
         print()
 
         # One untimed pass: the first call pays for imports, model
         # construction and connection setup, and reporting that as the
         # typical case would be dishonest in the other direction.
-        await one_run(graph, worker_id, patient)
+        await one_run(graph, worker_id, patient, audio_b64)
 
         samples: dict[str, list[float]] = {}
         for i in range(args.runs):
-            for node, ms in (await one_run(graph, worker_id, patient)).items():
+            for node, ms in (await one_run(graph, worker_id, patient, audio_b64)).items():
                 samples.setdefault(node, []).append(ms)
             print(f"\r  run {i + 1}/{args.runs}", end="", flush=True, file=sys.stderr)
         print("\r" + " " * 24 + "\r", end="", file=sys.stderr)
@@ -197,32 +227,53 @@ async def main() -> int:
         # figure that walks into a slide and gets a project marked down
         # when somebody asks what was mocked. So the verdict is withheld
         # unless the providers that dominate the time are real ones.
-        mocked = [
-            name for name, value in (
+        # STT and the LLM are what the clock is actually measuring. If
+        # either is mocked the total is the speed of a base64 decode and a
+        # canned string, and no verdict is issued -- an earlier version
+        # cheerfully printed "p95 = 0.00s (PASS)" on exactly that, which
+        # is the sort of figure that ends up on a slide.
+        #
+        # use_mocks is reported but does not block the verdict. It gates
+        # WhatsApp and SMS, which are independent of stt_provider and
+        # llm_provider (see app/core/config.py). It does touch agent3,
+        # which sends the message, so it is named in the caveat rather
+        # than ignored.
+        blocking = [
+            f"{name}={value}" for name, value in (
                 ("stt_provider", settings.stt_provider),
                 ("llm_provider", settings.llm_provider),
             ) if value == "mock"
         ]
-        if settings.use_mocks:
-            mocked.append("use_mocks=true")
 
         total_p95 = pct(samples.get("TOTAL", []), 95)
-        if mocked:
-            print("NOT A VALID MEASUREMENT — these providers are mocked:")
-            for m in mocked:
+
+        if blocking:
+            print("NO VERDICT — the providers that dominate the time are mocked:")
+            for m in blocking:
                 print(f"      {m}")
             print()
-            print("      The figures above are the speed of a base64 decode and")
-            print("      canned strings, not of speech recognition and a language")
-            print("      model. They must not be quoted as SevakAI's latency.")
+            print("      These figures are the speed of a base64 decode and canned")
+            print("      strings, not of speech recognition and a language model.")
+            print("      They must not be quoted as SevakAI's latency.")
             print()
-            print("      For a real number:")
-            print("        STT_PROVIDER=whisper LLM_PROVIDER=real USE_MOCKS=false \\")
+            print("      For a real number, with Bhashini credentials in .env:")
+            print("        STT_PROVIDER=bhashini LLM_PROVIDER=real \\")
             print("          python -m scripts.measure_latency --runs 30")
             return 2
 
         print(f"NFR-P1 target <30s end-to-end: p95 = {total_p95 / 1000:.2f}s "
               f"({'PASS' if total_p95 < 30000 else 'FAIL'})")
+        print()
+        print("Measured with:")
+        print(f"      stt_provider = {settings.stt_provider}")
+        print(f"      llm_provider = {settings.llm_provider}")
+        if settings.use_mocks:
+            print()
+            print("      CAVEAT: use_mocks=true, so WhatsApp and SMS are mocked.")
+            print("      Speech recognition and the language model above are real,")
+            print("      but agent3_action_generation sends the message, so its row")
+            print("      excludes real delivery time. Re-run with USE_MOCKS=false")
+            print("      for the fully live figure.")
         return 0
     finally:
         db.close()
