@@ -30,11 +30,11 @@ export default function LoginPage() {
   return (
     <div className="login-page">
       <form className="login-card" onSubmit={handleSubmit}>
-        {/* Same wordmark as the nav rail -- the 3px status bar stood on
-            end. It is the first thing anyone sees of the product, and it
-            should be the thing they keep seeing. */}
+        {/* The one screen with room for the emblem at a size where its
+            motto is legible. Everywhere behind this, the rail shows it
+            small and the page belongs to the work. */}
         <div className="login-brand">
-          <span className="rail-mark" aria-hidden="true" />
+          <img className="login-logo" src="/sevakai-emblem.png" alt="SevakAI" />
           <h1>SevakAI</h1>
         </div>
         <p className="subtitle">District health supervision</p>

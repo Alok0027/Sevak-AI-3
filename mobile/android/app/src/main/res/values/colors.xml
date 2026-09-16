@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The medallion green, sampled from the emblem artwork rather than
+         picked by eye, so the adaptive icon's background is continuous
+         with the mark sitting on it. -->
+    <color name="ic_launcher_background">#024715</color>
+</resources>

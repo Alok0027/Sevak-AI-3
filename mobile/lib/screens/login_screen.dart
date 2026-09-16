@@ -62,7 +62,20 @@ class _LoginScreenState extends State<LoginScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Icon(Icons.health_and_safety, size: 56, color: Color(0xFF1F6F4A)),
+              // The emblem, not a Material glyph. This is the first
+              // screen an ASHA sees and the one a reviewer screenshots,
+              // and a stock health icon says nothing about whose service
+              // this is. Bundled as an asset rather than fetched, because
+              // she may well be opening the app with no signal.
+              Image.asset(
+                'assets/brand/sevakai_emblem.png',
+                height: 112,
+                // If the asset is ever missing from a build, a broken
+                // image box on the sign-in screen looks like a broken
+                // app. Fall back to the old glyph instead.
+                errorBuilder: (_, __, ___) =>
+                    const Icon(Icons.health_and_safety, size: 56, color: Color(0xFF14624A)),
+              ),
               const SizedBox(height: 12),
               Text(
                 tr(context, 'signIn'),

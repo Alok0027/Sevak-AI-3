@@ -41,7 +41,18 @@
   padding: 0 var(--s2);
 }
 
-/* The wordmark's mark is the status rail stood on end. */
+/* The emblem beside the wordmark. 26px is the size at which the mother
+   and child still read and the crest does not turn the rail's head into
+   a masthead. */
+.rail-logo {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+/* Kept: the status rail stood on end, still used as a mark wherever the
+   emblem would be too heavy. */
 .rail-mark {
   width: var(--rail);
   height: 20px;
@@ -1180,11 +1191,22 @@ table.data td.drivers {
   gap: var(--s3);
 }
 
+/* Stacked, not in a row. The emblem is round and the wordmark is wide;
+   set side by side at a size where the motto is readable, the pair is
+   wider than the card. */
 .login-brand {
   display: flex;
+  flex-direction: column;
   align-items: center;
   gap: var(--s2);
   margin-bottom: var(--s1);
+  text-align: center;
+}
+
+.login-logo {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
 }
 
 .login-card h1 {
@@ -1195,6 +1217,10 @@ table.data td.drivers {
   color: var(--slate);
   font-size: 13.5px;
   margin-bottom: var(--s3);
+  /* Centred with the emblem above it. The fields below stay left
+     aligned, because a centred label sitting over a full width input is
+     the one arrangement that makes a form harder to scan. */
+  text-align: center;
 }
 
 .login-card label {

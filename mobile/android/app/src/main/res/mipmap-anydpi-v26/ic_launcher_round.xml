@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 8 and up. The launcher masks this into whatever shape the
+     phone's theme uses (a circle on Pixel, a squircle on Samsung, a
+     rounded square elsewhere) and crops anything outside the inner 66dp
+     of the 108dp canvas.
+
+     That is why the foreground is the mother and child mark alone rather
+     than the whole badge. The badge's ring and its two rings of lettering
+     sit exactly in the cropped band, so shipping it here would give a
+     differently sliced icon on every make of phone, and unreadable text
+     on all of them. The full badge still appears at ic_launcher.png for
+     older launchers, on the splash screen, and on the login screen. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+    <monochrome android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>

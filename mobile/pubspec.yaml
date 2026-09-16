@@ -37,3 +37,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  assets:
+    # The emblem, shown on the sign-in screen and used to generate every
+    # launcher icon (see android/app/src/main/res and ios/.../AppIcon).
+    - assets/brand/
