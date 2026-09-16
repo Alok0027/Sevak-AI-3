@@ -59,6 +59,63 @@ class ApiClient {
     return data;
   }
 
+  /// Her own record: code, sub-centre, counts, and any leave arranged.
+  Future<Map<String, dynamic>> fetchMyProfile() async {
+    final resp = await http.get(Uri.parse('$baseUrl/api/v1/workers/me'), headers: _headers);
+    if (resp.statusCode != 200) {
+      throw ApiException(_detail(resp.body) ?? 'Failed to load profile', status: resp.statusCode);
+    }
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
+
+  /// The other ASHAs in her sub-centre -- the people who could cover for
+  /// her. Names and codes only; a peer is not owed a staff directory.
+  Future<List<Map<String, dynamic>>> fetchColleagues() async {
+    final resp = await http.get(Uri.parse('$baseUrl/api/v1/workers/colleagues'), headers: _headers);
+    if (resp.statusCode != 200) {
+      throw ApiException(_detail(resp.body) ?? 'Failed to load colleagues', status: resp.statusCode);
+    }
+    return (jsonDecode(resp.body) as List).cast<Map<String, dynamic>>();
+  }
+
+  /// "I am away until the 20th, and Kavita is covering."
+  ///
+  /// Not a transfer: the patients stay hers. See the WorkerAbsence model
+  /// for why that distinction is the whole design.
+  Future<Map<String, dynamic>> declareLeave({
+    required String coveringWorkerId,
+    required DateTime startsOn,
+    required DateTime endsOn,
+    String? reason,
+  }) async {
+    String day(DateTime d) => d.toIso8601String().split('T').first;
+    final resp = await http.post(
+      Uri.parse('$baseUrl/api/v1/workers/me/absence'),
+      headers: _headers,
+      body: jsonEncode({
+        'covering_worker_id': coveringWorkerId,
+        'starts_on': day(startsOn),
+        'ends_on': day(endsOn),
+        'reason': reason,
+      }),
+    );
+    if (resp.statusCode != 201) {
+      throw ApiException(_detail(resp.body) ?? 'Could not arrange cover', status: resp.statusCode);
+    }
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
+
+  /// She is back early.
+  Future<void> endLeave(String absenceId) async {
+    final resp = await http.delete(
+      Uri.parse('$baseUrl/api/v1/workers/me/absence/$absenceId'),
+      headers: _headers,
+    );
+    if (resp.statusCode != 200) {
+      throw ApiException(_detail(resp.body) ?? 'Could not end that', status: resp.statusCode);
+    }
+  }
+
   /// Ask for an account. Returns no token: registering is a request, and
   /// an admin has to approve it before she can sign in.
   Future<Map<String, dynamic>> register({
@@ -190,6 +247,7 @@ class ApiClient {
     String? village,
     String? phone,
     String? pregnancyStage,
+    String? rchNumber,
     int? bpSystolic,
     int? bpDiastolic,
     int? bloodSugarFasting,
@@ -205,6 +263,7 @@ class ApiClient {
         'village': village,
         'phone': phone,
         'pregnancy_stage': pregnancyStage,
+        'rch_number': rchNumber,
         'bp_systolic': bpSystolic,
         'bp_diastolic': bpDiastolic,
         'blood_sugar_fasting': bloodSugarFasting,
@@ -212,7 +271,13 @@ class ApiClient {
       }),
     );
     if (resp.statusCode != 201) {
-      throw ApiException('Failed to add patient: ${resp.body}');
+      // 409 is the duplicate check: this woman is already on somebody's
+      // list. The reason matters -- "Failed to add patient" plus a JSON
+      // blob taught her nothing and she would simply type it again.
+      throw ApiException(
+        _detail(resp.body) ?? 'Failed to add patient: ${resp.body}',
+        status: resp.statusCode,
+      );
     }
     return Patient.fromJson(jsonDecode(resp.body) as Map<String, dynamic>);
   }

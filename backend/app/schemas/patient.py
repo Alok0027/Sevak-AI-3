@@ -14,6 +14,18 @@ class PatientCreate(BaseModel):
     village: str | None = None
     phone: str | None = None
     pregnancy_stage: str | None = None
+
+    # The number on her MCP card. Optional: an ASHA meeting a woman at her
+    # door before the sub-centre has registered her has none to type, and
+    # refusing the record until she does pushes the work back onto paper.
+    rch_number: str | None = None
+
+    # ANM only. She holds the sub-centre's RCH register in real life and
+    # hands the line-list down to her workers; this is the field that lets
+    # her do it here. An ASHA passing it for somebody else is refused --
+    # a worker who could file patients onto a colleague's list could also
+    # quietly empty her own.
+    worker_id: str | None = None
     # Baseline readings taken at registration. Per-visit measurements live
     # on the visit record (app.schemas.visit.ExtractedFields) -- these are
     # the starting point later visits are compared against, not a risk input.
@@ -48,6 +60,11 @@ class TriageFields(BaseModel):
 class PatientSummary(TriageFields):
     id: str
     name: str
+    rch_number: str | None = None
+    # Set only when this patient is on her list because she is covering
+    # for somebody who is away -- the name of that somebody. Null for her
+    # own patients, which is almost all of them.
+    covering_for: str | None = None
     age: int | None = None
     village: str | None = None
     pregnancy_stage: str | None = None
@@ -72,6 +89,7 @@ class PatientDirectoryEntry(TriageFields):
 
     id: str
     name: str
+    rch_number: str | None = None
     age: int | None = None
     gender: str | None = None
     village: str | None = None
@@ -122,3 +140,21 @@ class PatientVoiceIntakeResponse(BaseModel):
 
     transcript: str
     extracted: ExtractedIntakeFields
+
+
+class ReassignRequest(BaseModel):
+    """Move a patient, or a whole caseload, to another ASHA."""
+
+    to_worker_id: str
+    # Required, and it is the point. An ASHA leaving, going on maternity
+    # leave, or being replaced are different facts about a real person's
+    # employment, and six months later the audit log is the only place
+    # anybody can find out which one happened.
+    reason: str = Field(min_length=5, max_length=500)
+
+
+class ReassignResult(BaseModel):
+    moved: int
+    from_worker_id: str
+    to_worker_id: str
+    to_worker_name: str

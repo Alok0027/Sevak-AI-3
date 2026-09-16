@@ -40,7 +40,12 @@ def test_history_returns_the_whole_registration_record():
                 "age": 34,
                 "gender": "female",
                 "village": "Wagholi",
-                "phone": "9876543210",
+                # Not 9876543210. That is Meera Patil's number in the demo
+                # fixtures and this test registers under the same ASHA, so
+                # the duplicate check reads it as the same woman twice --
+                # correctly. The test was quietly relying on being able to
+                # do that.
+                "phone": "9876500042",
                 "pregnancy_stage": "5 months",
                 "bp_systolic": 132,
                 "bp_diastolic": 86,
@@ -58,7 +63,7 @@ def test_history_returns_the_whole_registration_record():
         assert body["age"] == 34
         assert body["gender"] == "female"
         assert body["village"] == "Wagholi"
-        assert body["phone"] == "9876543210"
+        assert body["phone"] == "9876500042"
         assert body["pregnancy_stage"] == "5 months"
         assert (body["bp_systolic"], body["bp_diastolic"]) == (132, 86)
         assert body["blood_sugar_fasting"] == 104

@@ -26,7 +26,9 @@ from app.api.deps import DbSession, require_roles
 from app.core.config import get_settings
 from app.db.models.patient import Patient
 from app.db.models.sync_queue import SyncQueueEntry
+from app.db.models.worker import Worker
 from app.schemas.sync import SyncBatchRequest, SyncBatchResponse
+from app.services import identity
 from app.services.visit_pipeline import run_voice_visit
 
 router = APIRouter(prefix="/api/v1/sync", tags=["sync"])
@@ -105,13 +107,41 @@ def _apply_patient(db, worker_id: str, record: dict) -> None:
     if not name:
         raise ValueError("patient record has no name")
 
+    village = (record.get("village") or "").strip() or None
+    phone = record.get("phone")
+    # Derived exactly as POST /patients derives them, rather than left for
+    # backfill_identity() to fix on the next boot. A woman registered with
+    # no signal is not a second-class record: until these are set she is
+    # invisible to the duplicate check and to every village lookup, so the
+    # colleague who registers her again tomorrow is not warned.
+    owner = db.query(Worker).filter(Worker.worker_id == worker_id).first()
+    try:
+        rch = identity.normalise_rch(record.get("rch_number"))
+    except identity.InvalidRchNumber:
+        # Typed wrong on a phone with no signal, days ago. Dropping the
+        # number keeps the woman; refusing the record loses her, and she
+        # is the part that cannot be re-entered from memory. The ASHA can
+        # correct the number once it is on her list.
+        rch = None
+
+    # rch_number is unique. Somebody else registering the same woman while
+    # this phone was offline is not a reason to fail the whole batch and
+    # strand every other record in it -- keep her, drop the number, and
+    # let the duplicate surface on the list where a human can merge them.
+    if rch and db.query(Patient).filter(Patient.rch_number == rch).first() is not None:
+        rch = None
+
     patient = Patient(
         worker_id=worker_id,
         name=name,
         age=record.get("age"),
         gender=record.get("gender"),
-        village=record.get("village"),
-        phone=record.get("phone"),
+        village=village,
+        village_code=identity.village_code(village),
+        sub_centre_id=owner.sub_centre_id if owner else None,
+        phone=phone,
+        phone_hash=identity.phone_index(phone),
+        rch_number=rch,
         pregnancy_stage=record.get("pregnancy_stage"),
     )
     if patient_id:

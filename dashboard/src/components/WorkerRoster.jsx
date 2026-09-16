@@ -58,7 +58,14 @@ export default function WorkerRoster({ workers, showSubCentre }) {
 
   const filtered = useMemo(() => {
     return workers.filter((w) => {
-      if (search && !w.name.toLowerCase().includes(search.toLowerCase())) return false;
+      // Name or code. A supervisor holding a referral form has the code
+      // and not always the spelling of the name, which is the case this
+      // search exists for.
+      if (search) {
+        const q = search.toLowerCase();
+        const hay = `${w.name} ${w.worker_code || ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
       if (riskFilter === "high" && w.high_risk_count === 0) return false;
       if (riskFilter === "pending" && w.pending_followups === 0) return false;
       if (riskFilter === "inactive" && w.total_visits > 0) return false;
@@ -74,7 +81,7 @@ export default function WorkerRoster({ workers, showSubCentre }) {
       <div className="filters">
         <input
           className="grow"
-          placeholder="Search worker name"
+          placeholder="Search name or ASHA code"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -126,6 +133,12 @@ export default function WorkerRoster({ workers, showSubCentre }) {
                         <span className="cell-stack">
                           <span className="cell-strong">{w.name}</span>
                           <span className="cell-sub">
+                            {w.worker_code && (
+                              <>
+                                <span className="worker-code">{w.worker_code}</span>
+                                {" · "}
+                              </>
+                            )}
                             {w.phone} · {w.language_pref.toUpperCase()}
                           </span>
                         </span>

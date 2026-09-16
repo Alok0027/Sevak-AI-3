@@ -1317,3 +1317,93 @@ table.data td.drivers {
     border-top: none;
   }
 }
+
+/* The formal staff number (ASHA-PUNE-01-007) wherever a worker is named.
+   Tabular and slightly tracked, because it is read character by character
+   off a referral form rather than as a word -- and set apart from the
+   phone number beside it so the eye can tell two strings of digits and
+   dashes apart at a glance. */
+.worker-code {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* Cover while somebody is on leave. Indigo, like every other place in the
+   product where the meaning is "a person arranged this" rather than "the
+   system decided it". */
+.cover-note {
+  color: var(--indigo);
+  font-weight: 600;
+}
+
+/* A StatusRow's two halves: the subject on the left, the consequence on
+   the right. Both are columns, so a name and its code stack rather than
+   running into one line that truncates the code -- which is the half a
+   supervisor is most likely to be reading off a form. */
+.status-row-body .row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.status-row-body .row-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.status-row-body .row-main .cell-sub,
+.status-row-body .row-side .cell-sub {
+  display: block;
+}
+
+@media (max-width: 560px) {
+  /* Below this the two columns fight for the same 300px. Stacking keeps
+     the cover line readable instead of wrapping it two words at a time. */
+  .status-row-body {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--s2);
+  }
+  .status-row-body .row-side {
+    align-items: flex-start;
+    text-align: left;
+  }
+}
+
+/* A short form inside a Section: label above field, one column. Used by
+   the caseload handover, which is rare, irreversible, and therefore the
+   wrong place to save vertical space by putting fields side by side. */
+.stack-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  max-width: 520px;
+}
+
+.stack-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--slate);
+}
+
+.stack-form label input,
+.stack-form label select {
+  width: 100%;
+}
+
+.form-actions {
+  display: flex;
+  gap: var(--s2);
+  justify-content: flex-end;
+}

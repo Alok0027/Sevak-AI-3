@@ -156,6 +156,15 @@ class _PatientListScreenState extends State<PatientListScreen> {
         // the rail already carries the colour, and a red pill on top of a
         // red rail beside red text is the same fact said three times.
         subtitleIsUrgent: p.needsAttention,
+        // Only ever set while she is covering for someone on leave.
+        //
+        // A placeholder, not a prefix plus the name. In Hindi and Marathi
+        // the phrase is a postposition -- "Sunita ke liye", not "ke liye
+        // Sunita" -- so a string concatenated in English word order comes
+        // out backwards in four of the six languages.
+        note: p.coveringFor == null
+            ? null
+            : tr(context, 'coveringFor').replaceAll('{name}', p.coveringFor!),
         trailing: IconButton(
           icon: const Icon(Icons.mic, color: T.forest),
           tooltip: tr(context, 'recordAVisit'),

@@ -18,6 +18,7 @@ import WorkerRoster from "../components/WorkerRoster";
 import EscalationList from "../components/EscalationList";
 import FollowupCompliance from "../components/FollowupCompliance";
 import RegistrationQueue from "../components/RegistrationQueue";
+import CoverPanel from "../components/CoverPanel";
 
 const POLL_INTERVAL_MS = 60_000;
 
@@ -123,6 +124,13 @@ export default function DashboardPage() {
           escalations would tax the one screen meant to surface urgent
           things, every day, to say nothing happened. */}
       {auth?.role === "anm" && <RegistrationQueue collapseWhenEmpty onChange={refresh} />}
+
+      {/* Above the accountability table on purpose. A follow-up that
+          looks missed because the ASHA is on leave and a follow-up that
+          is genuinely missed are the same red row -- the supervisor has
+          to know which she is looking at before she reads the table, not
+          after she has rung the worker. */}
+      <CoverPanel />
 
       <Section
         title="Visit accountability"

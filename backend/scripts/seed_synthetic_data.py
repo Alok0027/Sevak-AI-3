@@ -31,7 +31,8 @@ from app.db.models.visit import Visit
 from app.db.models.worker import Worker
 from app.agents.agent2_risk_classification import classify
 from app.agents.agent3_action_generation import FOLLOWUP_DAYS as AGENT3_FOLLOWUP_DAYS
-from app.db.session import SessionLocal, init_db
+from app.db.session import SessionLocal, backfill_identity, init_db
+from app.services import identity
 from app.schemas.visit import ExtractedFields
 
 fake = Faker("en_IN")
@@ -211,13 +212,21 @@ def seed_caseload(db, worker, patients_per_worker: int, months_history: int) -> 
     """
     for _ in range(patients_per_worker):
         is_pregnant = random.random() < 0.35
+        village = random.choice(VILLAGES)
+        phone = fake.numerify("9#########")
         patient = Patient(
             worker_id=worker.worker_id,
             name=fake.name(),
             age=random.randint(18, 45) if is_pregnant else random.randint(1, 70),
             gender=random.choice(["female", "male"]),
-            village=random.choice(VILLAGES),
-            phone=fake.numerify("9#########"),
+            village=village,
+            # Set here rather than left to the startup backfill, so a
+            # freshly seeded database is already in the shape the app
+            # expects instead of one boot behind it.
+            village_code=identity.village_code(village),
+            sub_centre_id=worker.sub_centre_id,
+            phone=phone,
+            phone_hash=identity.phone_index(phone),
             pregnancy_stage=f"{random.randint(1, 9)} months" if is_pregnant else None,
         )
         db.add(patient)
@@ -386,6 +395,10 @@ def main() -> None:
         total_workers = db.query(Worker).count()
         total_patients = db.query(Patient).count()
         total_visits = db.query(Visit).count()
+        # Worker codes for everybody this run created. Same function the
+        # app calls at startup, so a seeded database and a deployed one
+        # never disagree about how a code is shaped.
+        backfill_identity()
         print(f"Seeded: {total_workers} workers, {total_patients} patients, {total_visits} historical visits.")
     finally:
         db.close()

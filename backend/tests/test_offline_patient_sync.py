@@ -10,6 +10,7 @@ patient registered offline references a patient_id the server has never
 seen; applied in arrival order it fails the visit, then succeeds the
 patient, and retries forever.
 """
+import random
 import uuid
 
 import pytest
@@ -33,6 +34,17 @@ def auth(client):
     assert r.status_code == 200
     body = r.json()
     return {"Authorization": f"Bearer {body['access_token']}"}, body["worker_id"]
+
+
+def _fresh_rch() -> str:
+    """A 12-digit number nothing else in the suite has claimed.
+
+    rch_number is unique across the whole table and the tests share one
+    database, so a hardcoded number passes in isolation and fails the
+    moment another module registers it first -- which is exactly the bug
+    this column is meant to catch in production.
+    """
+    return f"9{random.randrange(10**10, 10**11):011d}"
 
 
 def _patient_record(**over):
@@ -153,5 +165,109 @@ def test_an_unknown_record_type_is_queued_not_lost(client, auth):
     try:
         assert db.query(SyncQueueEntry).filter(
             SyncQueueEntry.record_type == "household_survey").count() >= 1
+    finally:
+        db.close()
+
+
+def test_offline_registration_gets_the_same_identity_keys_as_an_online_one():
+    """A woman registered with no signal is not a second-class record.
+
+    The identity columns -- village code, the phone blind index, her
+    sub-centre -- are what the duplicate check and every village lookup
+    run on. Leaving them for backfill_identity() to fix on the next boot
+    means that until somebody restarts the API she is invisible to both,
+    so the colleague who registers her again tomorrow is not warned.
+    """
+    from app.services import identity
+
+    client = TestClient(app)
+    r = client.post("/api/v1/auth/login", json=DEMO_ASHA)
+    headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    worker_id = r.json()["worker_id"]
+
+    rch = _fresh_rch()
+    # Spaced, the way it is printed on the MCP card.
+    rch_typed = f"{rch[:4]} {rch[4:8]} {rch[8:]}"
+    rec = _patient_record(
+        name="Anjali Kadam",
+        village="  wagholi  ",
+        phone="9876500091",
+        rch_number=rch_typed,
+    )
+    resp = client.post("/api/v1/sync/batch",
+                       json={"worker_id": worker_id, "records": [rec]}, headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["synced"] == 1
+
+    db = SessionLocal()
+    try:
+        saved = db.query(Patient).filter(Patient.patient_id == rec["patient_id"]).first()
+        assert saved is not None
+        assert saved.village_code == "WAGHOLI"
+        assert saved.rch_number == rch
+        assert saved.phone_hash == identity.phone_index("9876500091")
+        assert saved.sub_centre_id is not None
+    finally:
+        db.close()
+
+
+def test_a_bad_rch_number_does_not_cost_us_the_woman():
+    """Typed wrong, days ago, on a phone with no signal.
+
+    Dropping the number keeps the record; refusing it loses her -- and she
+    is the part nobody can re-enter from memory. The ASHA corrects the
+    number once the row is on her list.
+    """
+    client = TestClient(app)
+    r = client.post("/api/v1/auth/login", json=DEMO_ASHA)
+    headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    worker_id = r.json()["worker_id"]
+
+    rec = _patient_record(name="Shobha More", rch_number="12345")
+    resp = client.post("/api/v1/sync/batch",
+                       json={"worker_id": worker_id, "records": [rec]}, headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["synced"] == 1
+
+    db = SessionLocal()
+    try:
+        saved = db.query(Patient).filter(Patient.patient_id == rec["patient_id"]).first()
+        assert saved is not None
+        assert saved.name == "Shobha More"
+        assert saved.rch_number is None
+    finally:
+        db.close()
+
+
+def test_a_duplicate_rch_number_does_not_strand_the_rest_of_the_batch():
+    """rch_number is unique. Somebody else registering the same woman while
+    this phone was offline must not fail every other record queued behind
+    her -- a batch can span several days of work."""
+    client = TestClient(app)
+    r = client.post("/api/v1/auth/login", json=DEMO_ASHA)
+    headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    worker_id = r.json()["worker_id"]
+
+    shared = _fresh_rch()
+    first = _patient_record(name="Rekha Shinde", rch_number=shared)
+    second = _patient_record(name="Rekha S", rch_number=shared)
+    third = _patient_record(name="Vaishali Jadhav")
+
+    resp = client.post(
+        "/api/v1/sync/batch",
+        json={"worker_id": worker_id, "records": [first, second, third]},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["synced"] == 3
+
+    db = SessionLocal()
+    try:
+        a = db.query(Patient).filter(Patient.patient_id == first["patient_id"]).first()
+        b = db.query(Patient).filter(Patient.patient_id == second["patient_id"]).first()
+        c = db.query(Patient).filter(Patient.patient_id == third["patient_id"]).first()
+        assert a.rch_number == shared
+        assert b is not None and b.rch_number is None
+        assert c is not None  # the record behind the clash still landed
     finally:
         db.close()

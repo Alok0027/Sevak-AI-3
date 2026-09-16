@@ -64,6 +64,7 @@ class OfflineQueue {
     String? village,
     String? phone,
     String? pregnancyStage,
+    String? rchNumber,
   }) async {
     final db = await _database;
     await db.insert('sync_queue', {
@@ -79,6 +80,7 @@ class OfflineQueue {
         'village': village,
         'phone': phone,
         'pregnancy_stage': pregnancyStage,
+        'rch_number': rchNumber,
       }),
       'created_at': DateTime.now().toIso8601String(),
       'retry_count': 0,

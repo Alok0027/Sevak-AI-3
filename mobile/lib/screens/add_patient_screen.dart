@@ -45,6 +45,12 @@ class _AddPatientScreenState extends State<AddPatientScreen> {
   final _phoneController = TextEditingController();
   final _pregnancyController = TextEditingController();
   final _genderController = TextEditingController();
+  // The number on her MCP card -- the identifier the sub-centre's RCH
+  // register, the ANM's line-list and every referral form already use.
+  // Optional, because an ASHA meeting a woman at her door before the
+  // sub-centre has registered her has none to type, and refusing the
+  // record until she does pushes the work back onto paper.
+  final _rchController = TextEditingController();
   // Baseline vitals taken at registration. Fasting and random blood sugar
   // are separate fields because the NHM cutoffs differ (>=126 vs >=200
   // mg/dL) -- one box can't be judged against either.
@@ -100,6 +106,10 @@ class _AddPatientScreenState extends State<AddPatientScreen> {
     try {
       if (_isRecording) {
         final path = await _recorder.stop();
+        // Guarded from here down: she can back out of this screen while a
+        // recording is stopping or an intake request is in flight, and a
+        // setState on a disposed State throws.
+        if (!mounted) return;
         setState(() => _isRecording = false);
         if (path != null) {
           await _processRecording(path, language, processFailed, heardNothing);
@@ -114,11 +124,13 @@ class _AddPatientScreenState extends State<AddPatientScreen> {
       final dir = await getTemporaryDirectory();
       final path = '${dir.path}/patient_intake_${DateTime.now().millisecondsSinceEpoch}.m4a';
       await _recorder.start(const RecordConfig(), path: path);
+      if (!mounted) return;
       setState(() {
         _isRecording = true;
         _lastTranscript = null;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() => _isRecording = false);
       _showError('$startFailed: $e');
     }
@@ -136,6 +148,7 @@ class _AddPatientScreenState extends State<AddPatientScreen> {
       final audioBase64 = base64Encode(bytes);
       final result = await widget.api.voiceIntake(audioBase64: audioBase64, languageCode: languageCode);
       final extracted = result['extracted'] as Map<String, dynamic>;
+      if (!mounted) return;
       setState(() {
         _lastTranscript = result['transcript'] as String?;
         if (extracted['name'] != null) _nameController.text = extracted['name'] as String;
@@ -158,7 +171,7 @@ class _AddPatientScreenState extends State<AddPatientScreen> {
       final gotNothing = extracted.values.every((v) => v == null || v is Map && v.isEmpty);
       if (gotNothing) _showError(heardNothing);
     } catch (e) {
-      _showError('$processFailed: $e');
+      if (mounted) _showError('$processFailed: $e');
     } finally {
       if (mounted) setState(() => _isProcessingVoice = false);
     }
@@ -176,6 +189,7 @@ class _AddPatientScreenState extends State<AddPatientScreen> {
       final phone = _phoneController.text.trim();
       final pregnancy = _pregnancyController.text.trim();
       final gender = _genderController.text.trim();
+      final rch = _rchController.text.trim();
       // Registering a patient is on the offline path (FR-07.1), same as
       // recording a visit: an ASHA standing in a house with no signal has
       // to be able to save the woman in front of her and move on. The id
@@ -199,6 +213,7 @@ class _AddPatientScreenState extends State<AddPatientScreen> {
         village: village.isEmpty ? null : village,
         phone: phone.isEmpty ? null : phone,
         pregnancyStage: pregnancy.isEmpty ? null : pregnancy,
+        rchNumber: rch.isEmpty ? null : rch,
         bpSystolic: int.tryParse(_bpSystolicController.text.trim()),
         bpDiastolic: int.tryParse(_bpDiastolicController.text.trim()),
         bloodSugarFasting: int.tryParse(_sugarFastingController.text.trim()),
@@ -207,15 +222,27 @@ class _AddPatientScreenState extends State<AddPatientScreen> {
       if (!mounted) return;
       Navigator.of(context).pop(patient);
     } catch (e) {
-      // Could not reach the server at all. Queue rather than lose the
-      // registration -- the same fallback the record screen takes, and for
-      // the same reason: the ASHA has already done the work of asking.
+      // Two very different failures arrive here and used to be treated the
+      // same way.
       //
-      // A validation error from the server would also land here and be
-      // queued, where it will fail again on flush and surface then. That
-      // is the deliberate trade: a transcription of a real woman is worth
-      // more than a tidy queue, and the alternative is discarding her
-      // details because we could not tell which kind of failure it was.
+      // The server understood and refused -- she is already on somebody's
+      // list, or the RCH number is not twelve digits. Queueing that hides
+      // a decision the ASHA could act on at the doorstep behind a flush
+      // that fails again tomorrow with nobody watching. Tell her.
+      //
+      // The server could not be reached at all. Queue it, because the
+      // ASHA has already done the work of asking and a real woman's
+      // details are worth more than a tidy queue.
+      final status = e is ApiException ? e.status : null;
+      if (status != null && status >= 400 && status < 500) {
+        if (!mounted) return;
+        setState(() {
+          _error = status == 409
+              ? tr(context, 'alreadyRegistered')
+              : (e as ApiException).message;
+        });
+        return;
+      }
       try {
         final local = await _queueLocally();
         if (!mounted) return;
@@ -225,7 +252,7 @@ class _AddPatientScreenState extends State<AddPatientScreen> {
         Navigator.of(context).pop(local);
         return;
       } catch (_) {
-        setState(() => _error = e.toString());
+        if (mounted) setState(() => _error = e.toString());
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -242,6 +269,7 @@ class _AddPatientScreenState extends State<AddPatientScreen> {
     final pregnancy = _pregnancyController.text.trim();
     final gender = _genderController.text.trim();
     final name = _nameController.text.trim();
+    final rch = _rchController.text.trim();
     await _queue.enqueuePatient(
       workerId: widget.workerId,
       patientId: id,
@@ -251,6 +279,7 @@ class _AddPatientScreenState extends State<AddPatientScreen> {
       village: village.isEmpty ? null : village,
       phone: phone.isEmpty ? null : phone,
       pregnancyStage: pregnancy.isEmpty ? null : pregnancy,
+      rchNumber: rch.isEmpty ? null : rch,
     );
     return Patient(
       id: id,
@@ -269,6 +298,7 @@ class _AddPatientScreenState extends State<AddPatientScreen> {
     _phoneController.dispose();
     _pregnancyController.dispose();
     _genderController.dispose();
+    _rchController.dispose();
     _bpSystolicController.dispose();
     _bpDiastolicController.dispose();
     _sugarFastingController.dispose();
@@ -345,6 +375,25 @@ class _AddPatientScreenState extends State<AddPatientScreen> {
               style: T.body,
               decoration: InputDecoration(labelText: tr(context, 'phoneOptional')),
               keyboardType: TextInputType.phone,
+            ),
+            const SizedBox(height: T.s3),
+            TextFormField(
+              controller: _rchController,
+              style: T.body,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                labelText: tr(context, 'rchNumber'),
+                helperText: tr(context, 'rchHint'),
+                helperMaxLines: 3,
+              ),
+              // Checked here as well as on the server, because the server's
+              // refusal arrives after she has filled in the whole form and
+              // the card is in her hand right now.
+              validator: (v) {
+                final digits = (v ?? '').replaceAll(RegExp(r'\D'), '');
+                if (digits.isEmpty) return null;
+                return digits.length == 12 ? null : tr(context, 'rchHint');
+              },
             ),
             const SizedBox(height: T.s6),
             SectionHeading(tr(context, 'baselineReadings')),
