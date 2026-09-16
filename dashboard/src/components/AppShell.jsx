@@ -49,9 +49,11 @@ export default function AppShell({ title, scope, meta, actions, children }) {
     <div className="shell">
       <nav className="rail" aria-label="Main">
         <div className="rail-brand">
-          {/* The mark is the status rail itself, stood on end: the same
-              3px bar that runs down every row in the product. */}
-          <span className="rail-mark" aria-hidden="true" />
+          {/* The emblem replaces the 3px bar that stood in for a mark
+              until there was one. Small on purpose: the rail is
+              navigation, and a crest big enough to read its motto would
+              cost two destinations' worth of height on a laptop. */}
+          <img className="rail-logo" src="/sevakai-emblem.png" alt="" aria-hidden="true" />
           <span className="rail-wordmark">SevakAI</span>
         </div>
 
