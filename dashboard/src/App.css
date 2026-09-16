@@ -674,9 +674,16 @@ td.rail-cell.tone-human {
   color: var(--forest);
 }
 
+/* Two or three lines about one thing, sharing a left edge.
+ *
+ * align-items matters: a flex column stretches its children by default,
+ * and a stretched child that centres its own content (a button, a
+ * centred input) breaks the edge the stack exists to create. Starting
+ * them keeps every line the width of its own text. */
 .cell-stack {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 1px;
   white-space: normal;
 }

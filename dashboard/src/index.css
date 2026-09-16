@@ -116,6 +116,14 @@ button:disabled {
   padding: 0;
   color: var(--forest);
   font-weight: 600;
+  /* A bare button is a piece of text that happens to be clickable, so it
+     reads left like text. A <button> centres its label by default, which
+     nobody notices while the button is only as wide as its word -- and
+     then it is dropped into a flex column, stretches to the full cell,
+     and the name floats to the middle above a left-aligned line of
+     metadata. That is what it was doing to every patient name in the
+     escalation table. */
+  text-align: left;
 }
 
 .btn-bare:not(:disabled):hover {
