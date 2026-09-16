@@ -13,6 +13,7 @@ const read = (name, fallback) => css.getPropertyValue(name).trim() || fallback;
 
 export const TOKEN = {
   ink: read("--ink", "#10221c"),
+  fontDisplay: read("--font-display", '"Anek Latin", "Hind", system-ui, sans-serif'),
   forest: read("--forest", "#14624a"),
   sage: read("--sage", "#e8efea"),
   slate: read("--slate", "#5b6b64"),
@@ -46,4 +47,24 @@ export const tooltipProps = {
   },
   labelStyle: { color: TOKEN.slate, fontSize: 11.5, marginBottom: 2 },
   itemStyle: { color: TOKEN.ink },
+};
+
+/* A figure printed on the mark itself.
+ *
+ * Ink, never the series colour. A red "38" beside a red bar says the
+ * number is a category when it is a quantity, and it drags text below
+ * the contrast the ink token guarantees. The colour belongs to the bar;
+ * the number is text.
+ *
+ * Anek and tabular, so a column of figures lines up digit for digit --
+ * the same treatment every other number in this product gets.
+ *
+ * Used selectively. A chart with a value over every one of fourteen
+ * points is a table drawn badly; direct labels earn their place where
+ * there are few enough marks that the axis can come off instead. */
+export const valueLabelProps = {
+  fill: TOKEN.ink,
+  fontSize: 12,
+  fontWeight: 600,
+  fontFamily: TOKEN.fontDisplay,
 };
