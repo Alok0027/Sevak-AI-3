@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import DbSession, get_supervisor_scope, require_roles
 from app.core.config import get_settings
+from app.db.models.patient import Patient
 from app.db.models.risk_flag import RiskFlag
 from app.db.models.visit import Visit
 from app.db.models.worker import Worker
@@ -21,6 +22,7 @@ from app.schemas.visit import (
     VoiceVisitRequest,
     VoiceVisitResponse,
 )
+from app.services import cover
 from app.services.audit import record as audit_record
 from app.services.bhashini_client import get_bhashini_client
 from app.services.llm_client import get_llm_client
@@ -65,14 +67,40 @@ async def extract_only(
 async def record_voice_visit(
     payload: VoiceVisitRequest,
     db: DbSession,
-    _user=Depends(require_roles("asha")),
+    user=Depends(require_roles("asha")),
 ) -> VoiceVisitResponse:
+    """Record a visit.
+
+    Two guards that were not here before, and the second is why the first
+    had to be written.
+
+    The visit is filed against the signed-in worker, not against whatever
+    worker_id the request carried. The pipeline never checked, so an ASHA
+    could post a visit under a colleague's name -- inflating that
+    colleague's numbers on the accountability dashboard, or hiding her own
+    workload behind somebody else's.
+
+    And the patient has to be one this worker can actually see: her own,
+    or one belonging to a colleague she is covering for while that
+    colleague is away. That check had to exist before cover could, because
+    "anyone may record for anyone" is not an access rule, it is the
+    absence of one.
+    """
     settings = get_settings()
+    patient = db.query(Patient).filter(Patient.patient_id == payload.patient_id).first()
+    if patient is None:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    if patient.worker_id not in cover.visible_worker_ids(db, user.worker_id):
+        raise HTTPException(status_code=403, detail="Not your patient")
+
     try:
         return await run_voice_visit(
             db=db,
             settings=settings,
-            worker_id=payload.worker_id,
+            # Hers, always. She walked to the house; the record says so,
+            # and a covered visit is honestly attributed to whoever made
+            # it rather than to the woman on leave.
+            worker_id=user.worker_id,
             patient_id=payload.patient_id,
             audio_base64=payload.audio_base64,
             language_code=payload.language_code,

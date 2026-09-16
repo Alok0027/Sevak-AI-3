@@ -25,6 +25,18 @@ class Worker(Base):
     sub_centre_id: Mapped[str] = mapped_column(String, nullable=True)
     role: Mapped[str] = mapped_column(String, default="asha")  # asha | anm | bmo | admin
 
+    # The identifier a person can read aloud: ASHA-PUNE-01-007.
+    #
+    # A worker_id is a UUID, which is right for a foreign key and useless
+    # on a referral slip or in a block meeting. Generated on creation from
+    # role and sub-centre (app/services/identity.py) and never reissued --
+    # it appears on paperwork, so a code that changed would make last
+    # month's forms refer to nobody.
+    #
+    # Nullable because the column arrived on tables that already had rows;
+    # those are filled in by the backfill in app/db/session.py.
+    worker_code: Mapped[str] = mapped_column(String, unique=True, nullable=True, index=True)
+
     # pending | active | rejected. Gates login (app/api/routes/auth.py).
     #
     # Defaults to "active", which is the opposite of what fail-closed would

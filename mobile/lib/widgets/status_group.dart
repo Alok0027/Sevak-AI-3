@@ -54,6 +54,17 @@ class StatusRow extends StatelessWidget {
   /// Emphasises the subtitle, for rows where the status is the news --
   /// an overdue visit rather than a routine one.
   final bool subtitleIsUrgent;
+
+  /// A standing fact about the row that is not its status: today, only
+  /// "Covering for Sunita" while she is away.
+  ///
+  /// Its own line in indigo rather than another clause in the subtitle,
+  /// because indigo means *a person arranged this* everywhere else in the
+  /// product (a risk override, a corrected transcript) and cover is
+  /// exactly that. Folding it into the subtitle would also make it
+  /// inherit the urgency colour, which would paint a routine patient red
+  /// for the wrong reason.
+  final String? note;
   final Widget? trailing;
   final VoidCallback? onTap;
 
@@ -63,6 +74,7 @@ class StatusRow extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.subtitleIsUrgent = false,
+    this.note,
     this.trailing,
     this.onTap,
   });
@@ -98,6 +110,24 @@ class StatusRow extends StatelessWidget {
                                   fontWeight:
                                       subtitleIsUrgent ? FontWeight.w600 : FontWeight.w500,
                                 ),
+                              ),
+                            ],
+                            if (note != null) ...[
+                              const SizedBox(height: 3),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.swap_horiz_rounded,
+                                      size: 13, color: T.indigo),
+                                  const SizedBox(width: T.s1),
+                                  Flexible(
+                                    child: Text(
+                                      note!,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: T.micro.copyWith(color: T.indigo),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ],

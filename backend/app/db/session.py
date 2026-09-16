@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from datetime import datetime
 
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -64,6 +65,7 @@ def get_db() -> Generator[Session, None, None]:
 def init_db() -> None:
     """Create all tables. Fine for SQLite dev / demo; use Alembic migrations for real Postgres."""
     from app.db.models import (  # noqa: F401  (import to register with Base.metadata)
+        absence,
         action,
         audit_log,
         hmis_report,
@@ -92,6 +94,13 @@ _ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "bp_diastolic": "INTEGER",
         "blood_sugar_fasting": "INTEGER",
         "blood_sugar_random": "INTEGER",
+        # Formal identity and geography -- see app/services/identity.py.
+        # UNIQUE is left to the model for the same reason as worker_code
+        # below: SQLite will not add a unique column to a populated table.
+        "rch_number": "TEXT",
+        "phone_hash": "TEXT",
+        "village_code": "TEXT",
+        "sub_centre_id": "TEXT",
     },
     # Registration + approval. The DEFAULT matters as much as the column:
     # it is what every worker row already in the database gets, and without
@@ -102,6 +111,12 @@ _ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "status": "TEXT NOT NULL DEFAULT 'active'",
         "approved_by": "TEXT",
         "approved_at": "TIMESTAMP",
+        # Deliberately declared without UNIQUE here. SQLite cannot add a
+        # unique column to a populated table, and the values do not exist
+        # until backfill_identity() below has run -- at which point a
+        # duplicate would be a bug, not a race. The model declares the
+        # constraint so a database created from scratch has it.
+        "worker_code": "TEXT",
     },
 }
 
@@ -149,3 +164,101 @@ def _add_missing_columns() -> None:
         with engine.connect() as conn:
             conn.exec_driver_sql("UPDATE workers SET status = 'active' WHERE status IS NULL")
             conn.commit()
+
+
+def backfill_identity() -> None:
+    """Fill in the identifiers and keys that arrived after the rows did.
+
+    Separate from _add_missing_columns() because this is not DDL: the
+    phone blind index needs the plaintext phone number, which only exists
+    on the far side of the ORM's decryption. Raw SQL would hash the
+    ciphertext, and every row would get a different key for the same
+    number -- a duplicate check that silently never matches, which is
+    worse than not having one.
+
+    Idempotent, and cheap when there is nothing to do: it looks only at
+    rows where the new column is still NULL, so a restart with everything
+    filled costs two indexed counts. Called from the app's lifespan, so a
+    deploy upgrades itself rather than waiting for somebody to remember a
+    script.
+    """
+    from app.db.models.patient import Patient
+    from app.db.models.worker import Worker
+    from app.services import identity
+
+    db = SessionLocal()
+    try:
+        _backfill_worker_codes(db, Worker, identity)
+        _backfill_patient_keys(db, Patient, identity)
+        db.commit()
+    except Exception:  # noqa: BLE001
+        # A backfill that cannot finish must not stop the API from
+        # serving. The columns are nullable and every reader tolerates a
+        # NULL; the next boot tries again.
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _backfill_worker_codes(db, Worker, identity) -> None:
+    pending = db.query(Worker).filter(Worker.worker_code.is_(None)).all()
+    if not pending:
+        return
+
+    # Serials continue from what is already issued rather than restarting
+    # at 1, or the second run of this would hand ASHA-PUNE-01-001 to a
+    # second person and the unique constraint would reject the whole
+    # batch.
+    used: set[str] = {
+        code for (code,) in db.query(Worker.worker_code).filter(Worker.worker_code.isnot(None))
+    }
+    counters: dict[tuple[str, str], int] = {}
+
+    # Oldest first, so the numbers follow the order people actually
+    # joined rather than the order a query happened to return them.
+    for worker in sorted(pending, key=lambda w: (w.created_at or datetime.min, w.worker_id)):
+        key = (worker.role or "asha", worker.sub_centre_id or "")
+        serial = counters.get(key, 0)
+        while True:
+            serial += 1
+            candidate = identity.worker_code(worker.role, worker.sub_centre_id, serial)
+            if candidate not in used:
+                break
+        counters[key] = serial
+        used.add(candidate)
+        worker.worker_code = candidate
+
+
+def _backfill_patient_keys(db, Patient, identity) -> None:
+    pending = (
+        db.query(Patient)
+        .filter(
+            (Patient.village_code.is_(None) & Patient.village.isnot(None))
+            | (Patient.phone_hash.is_(None) & Patient.phone.isnot(None))
+            | Patient.sub_centre_id.is_(None)
+        )
+        .all()
+    )
+    if not pending:
+        return
+
+    from app.db.models.worker import Worker
+
+    # One lookup for every worker involved, rather than one per patient.
+    worker_ids = {p.worker_id for p in pending}
+    sub_centres = {
+        w.worker_id: w.sub_centre_id
+        for w in db.query(Worker).filter(Worker.worker_id.in_(worker_ids)).all()
+    }
+
+    for patient in pending:
+        if patient.village_code is None:
+            patient.village_code = identity.village_code(patient.village)
+        if patient.phone_hash is None:
+            patient.phone_hash = identity.phone_index(patient.phone)
+        if patient.sub_centre_id is None:
+            # Seeded from her worker, which is the only record of where
+            # she is that exists before this column did. From here on it
+            # is her own, and reassignment leaves it alone.
+            patient.sub_centre_id = sub_centres.get(patient.worker_id)

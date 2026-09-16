@@ -1,9 +1,11 @@
-import { useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { fetchWorkerHistory } from "../api/client";
+import { useAuth } from "../context/AuthContext";
 import { useSortableData } from "../hooks/useSortableData";
 import AppShell from "../components/AppShell";
 import StatStrip from "../components/StatStrip";
+import CaseloadHandover from "../components/CaseloadHandover";
 import { Empty, RiskTag, Section } from "../components/Surface";
 
 /** One ASHA worker: her figures, then every visit she has recorded.
@@ -14,15 +16,21 @@ import { Empty, RiskTag, Section } from "../components/Surface";
 export default function WorkerDetailPage() {
   const { workerId } = useParams();
   const navigate = useNavigate();
+  const { auth } = useAuth();
+  // A BMO has read-only access to individual records (SRS table 4), so
+  // she gets the figures and not the handover control.
+  const canReassign = auth?.role === "anm" || auth?.role === "admin";
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [riskFilter, setRiskFilter] = useState("all");
 
-  useEffect(() => {
+  const load = useCallback(() => {
     fetchWorkerHistory(workerId)
       .then(setData)
       .catch((err) => setError(err.response?.data?.detail || "Failed to load worker"));
   }, [workerId]);
+
+  useEffect(load, [load]);
 
   const visits = useMemo(() => {
     if (!data) return [];
@@ -63,7 +71,9 @@ export default function WorkerDetailPage() {
   return (
     <AppShell
       title={w.name}
-      meta={[w.phone, w.sub_centre_id || "No sub-centre", w.language_pref.toUpperCase()].join("  ·  ")}
+      meta={[w.worker_code, w.phone, w.sub_centre_id || "No sub-centre", w.language_pref.toUpperCase()]
+        .filter(Boolean)
+        .join("  ·  ")}
       actions={
         <button className="btn-quiet" onClick={() => navigate(-1)}>
           ← Back
@@ -98,6 +108,8 @@ export default function WorkerDetailPage() {
           },
         ]}
       />
+
+      {canReassign && <CaseloadHandover worker={w} onDone={load} />}
 
       <Section
         title="Visit history"

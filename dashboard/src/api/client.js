@@ -126,6 +126,25 @@ export async function fetchWorkers({ subCentreId, search } = {}) {
   return data.workers;
 }
 
+// Who is on leave right now, and who is carrying their patients.
+// Scoped server-side: an ANM sees her own sub-centre, a BMO the district.
+export async function fetchAbsences() {
+  const { data } = await client.get("/api/v1/workers/absences");
+  return data.absences;
+}
+
+// Permanent: the whole caseload moves to another ASHA and stays there.
+// Not the same thing as leave cover, which lapses on its own and leaves
+// ownership alone -- this is the one a supervisor uses when somebody has
+// left the post, and it is restricted to an ANM for that reason.
+export async function reassignCaseload(fromWorkerId, toWorkerId, reason) {
+  const { data } = await client.post(
+    `/api/v1/patients/caseload/${fromWorkerId}/reassign`,
+    { to_worker_id: toWorkerId, reason },
+  );
+  return data;
+}
+
 export async function fetchWorkerHistory(workerId) {
   const { data } = await client.get(`/api/v1/workers/${workerId}/history`);
   return data;

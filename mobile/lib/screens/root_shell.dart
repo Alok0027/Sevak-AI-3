@@ -8,10 +8,12 @@ import '../services/offline_queue.dart';
 import '../services/refresh_signal.dart';
 import '../services/session.dart';
 import '../services/sync_service.dart';
+import '../theme/tokens.dart';
 import 'help_screen.dart';
 import 'home_screen.dart';
 import 'login_screen.dart';
 import 'patient_list_screen.dart';
+import 'profile_screen.dart';
 import 'task_list_screen.dart';
 
 /// Bottom-nav shell wrapping the ASHA worker's three main screens, plus a
@@ -113,6 +115,27 @@ class _RootShellState extends State<RootShell> {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => HelpScreen(api: widget.api, onReplayTutorial: _runTutorial),
+      ),
+    );
+  }
+
+  /// Profile carries sign-out as well as her code and her leave.
+  ///
+  /// Sign-out used to be its own icon up here, next to four others. On a
+  /// 360dp phone that left "Follow-ups" ellipsised in the title, and the
+  /// door icon sat one thumb-width from the sync button she is meant to
+  /// tap often -- a bad pair to put side by side. It belongs with the
+  /// rest of her account anyway.
+  void _openProfile() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ProfileScreen(
+          api: widget.api,
+          // Cover changes whose patients her list contains, so every tab
+          // has to refetch when she arranges or ends it.
+          onChanged: _onDataChanged,
+          onSignOut: _logout,
+        ),
       ),
     );
   }
@@ -237,9 +260,16 @@ class _RootShellState extends State<RootShell> {
             tooltip: tr(context, 'help'),
           ),
           IconButton(
-            onPressed: _logout,
-            icon: const Icon(Icons.logout),
-            tooltip: tr(context, 'signOut'),
+            onPressed: _openProfile,
+            tooltip: tr(context, 'profile'),
+            icon: CircleAvatar(
+              radius: 14,
+              backgroundColor: T.sage,
+              child: Text(
+                initialOf(widget.session.workerName),
+                style: T.micro.copyWith(color: T.forest, fontSize: 13),
+              ),
+            ),
           ),
         ],
       ),

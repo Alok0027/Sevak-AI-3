@@ -18,7 +18,7 @@ from app.api.routes import (
     workers,
 )
 from app.core.config import get_settings
-from app.db.session import SessionLocal, init_db
+from app.db.session import SessionLocal, backfill_identity, init_db
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -43,6 +43,19 @@ async def lifespan(_app: FastAPI):
             logger.exception("demo seeding failed; continuing without it")
         finally:
             db.close()
+
+    # Worker codes, village keys and the phone blind index, for rows that
+    # predate those columns.
+    #
+    # After seeding, not before: the demo accounts are created above and
+    # would otherwise go one whole boot without codes. Wrapped for the
+    # same reason -- the columns are nullable and every reader tolerates
+    # NULL, so a deployment that cannot finish a backfill should still
+    # serve and try again next boot rather than refuse to start.
+    try:
+        backfill_identity()
+    except Exception:  # noqa: BLE001
+        logger.exception("identity backfill failed; continuing without it")
 
     yield
 

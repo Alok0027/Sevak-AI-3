@@ -29,6 +29,45 @@ class Patient(Base):
     village: Mapped[str] = mapped_column(String, nullable=True)
     phone: Mapped[str] = mapped_column(EncryptedString, nullable=True)
     pregnancy_stage: Mapped[str] = mapped_column(String, nullable=True)  # e.g. "7 months" | None
+
+    # ── Who she is, formally ────────────────────────────────────────────
+    #
+    # The number on the Mother and Child Protection card she keeps in her
+    # own handbag, issued when the sub-centre registers her. Twelve
+    # digits, unique across the deployment.
+    #
+    # Optional on purpose. An ASHA meeting a woman at her door before the
+    # sub-centre has registered her has no RCH number to type, and
+    # refusing the visit until she does would push the work back onto
+    # paper -- the exact failure this product exists to remove.
+    rch_number: Mapped[str] = mapped_column(String, unique=True, nullable=True, index=True)
+
+    # A keyed hash of her phone number -- see app/services/identity.py.
+    #
+    # `phone` above is AES-GCM encrypted with a random nonce, so the same
+    # number never encrypts to the same bytes twice and equality lookups
+    # are impossible. That is the right property for confidentiality, and
+    # it is exactly why two ASHAs in neighbouring hamlets could both
+    # register the same pregnant woman with nothing noticing. This gives
+    # equality back without giving plaintext back.
+    phone_hash: Mapped[str] = mapped_column(String, nullable=True, index=True)
+
+    # ── Where she is ────────────────────────────────────────────────────
+    #
+    # `village` is what the ASHA typed, and is what gets displayed.
+    # `village_code` is the key it groups by, because "Wagholi",
+    # "wagholi" and " Wagholi " were three villages to the district
+    # heatmap.
+    village_code: Mapped[str] = mapped_column(String, nullable=True, index=True)
+
+    # The area she belongs to -- not the area of whoever is treating her.
+    #
+    # Her sub-centre used to be read off her ASHA, so when a worker moved,
+    # every patient silently moved sub-centre with her: a woman who had
+    # not left her village changed rows on a district report because
+    # somebody else changed jobs. Set once at registration, and left alone
+    # when her caseload is reassigned.
+    sub_centre_id: Mapped[str] = mapped_column(String, nullable=True, index=True)
     # Baseline vitals recorded at registration -- the reference point later
     # visits are read against. Per-visit measurements live on the visit's
     # structured_json and are what risk scoring actually uses; these are

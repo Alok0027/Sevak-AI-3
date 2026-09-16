@@ -21,6 +21,16 @@ class Patient {
   final String? attentionReason; // high_risk | overdue | due_today
   final int hoursOverdue;
 
+  /// The name of the ASHA this patient actually belongs to, when the
+  /// person looking is only covering for her. Null for her own patients,
+  /// which is nearly always.
+  ///
+  /// It has to be on the row rather than announced once at the top,
+  /// because during cover her list is two wards mixed together and the
+  /// question "is this woman mine" decides whether she walks there
+  /// tomorrow or hands the note back next week.
+  final String? coveringFor;
+
   Patient({
     required this.id,
     required this.name,
@@ -33,6 +43,7 @@ class Patient {
     this.needsAttention = false,
     this.attentionReason,
     this.hoursOverdue = 0,
+    this.coveringFor,
   });
 
   factory Patient.fromJson(Map<String, dynamic> json) => Patient(
@@ -49,5 +60,6 @@ class Patient {
         needsAttention: json['needs_attention'] as bool? ?? false,
         attentionReason: json['attention_reason'] as String?,
         hoursOverdue: json['hours_overdue'] as int? ?? 0,
+        coveringFor: json['covering_for'] as String?,
       );
 }

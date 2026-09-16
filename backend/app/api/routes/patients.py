@@ -27,9 +27,11 @@ from app.schemas.patient import (
     PatientSummary,
     PatientVoiceIntakeRequest,
     PatientVoiceIntakeResponse,
+    ReassignRequest,
+    ReassignResult,
 )
 from app.schemas.worker import PatientHistoryEntry, PatientHistoryResponse
-from app.services import patient_intake, patient_priority
+from app.services import cover, identity, patient_intake, patient_priority
 from app.services.llm_client import get_llm_client
 from app.services.audit import record as audit_record
 from app.services.bhashini_client import get_bhashini_client
@@ -99,18 +101,37 @@ async def voice_intake(
 def create_patient(
     payload: PatientCreate,
     db: DbSession,
-    user=Depends(require_roles("asha")),
+    user=Depends(require_roles("asha", "anm")),
 ) -> PatientSummary:
-    """FR-07.2 prerequisite: register a new patient under the signed-in
-    ASHA worker. She's the only one who registers her own patients from
-    the field -- ANM/BMO only ever view/aggregate what she's recorded."""
+    """FR-07.2 prerequisite: register a new patient.
+
+    An ASHA registers her own, which is the field case and by far the
+    common one. An ANM may also register one *to* a named ASHA in her
+    sub-centre, by passing worker_id -- that is the only way anything ever
+    flowed downward in this system. In real life the ANM holds the
+    sub-centre's RCH register and hands the line-list to her workers;
+    before this, the ANM could only watch.
+    """
+    owner = _resolve_owner(db, user, payload.worker_id)
+    rch = _validated_rch(payload.rch_number)
+    village = payload.village.strip() if payload.village else None
+    phone_hash = identity.phone_index(payload.phone)
+
+    _reject_duplicates(db, rch=rch, phone_hash=phone_hash, sub_centre_id=owner.sub_centre_id)
+
     patient = Patient(
-        worker_id=user.worker_id,
+        worker_id=owner.worker_id,
         name=payload.name.strip(),
         age=payload.age,
         gender=payload.gender,
-        village=payload.village.strip() if payload.village else None,
+        village=village,
+        village_code=identity.village_code(village),
+        # Hers from here on, and left alone when her caseload moves: she
+        # has not changed village because her ASHA changed jobs.
+        sub_centre_id=owner.sub_centre_id,
         phone=payload.phone,
+        phone_hash=phone_hash,
+        rch_number=rch,
         pregnancy_stage=payload.pregnancy_stage,
         bp_systolic=payload.bp_systolic,
         bp_diastolic=payload.bp_diastolic,
@@ -120,16 +141,102 @@ def create_patient(
     db.add(patient)
     db.commit()
     db.refresh(patient)
+
+    audit_record(
+        db,
+        user_id=user.worker_id,
+        action_type="patient.create",
+        record_id=patient.patient_id,
+        record_type="patient",
+        details={"assigned_to": owner.worker_id, "by_role": user.role},
+    )
     return PatientSummary(
         id=patient.patient_id,
         name=patient.name,
         age=patient.age,
         village=patient.village,
         pregnancy_stage=patient.pregnancy_stage,
+        rch_number=patient.rch_number,
         risk_status=None,
         last_visit=None,
         total_visits=0,
     )
+
+
+def _resolve_owner(db, user, requested_worker_id: str | None) -> Worker:
+    """Which ASHA this patient belongs to.
+
+    An ASHA registers for herself and may not name somebody else: a
+    worker who could file patients onto a colleague's list could also
+    quietly empty her own.
+    """
+    me = db.query(Worker).filter(Worker.worker_id == user.worker_id).first()
+    if me is None:
+        raise HTTPException(status_code=401, detail="Your account no longer exists")
+
+    if requested_worker_id is None or requested_worker_id == user.worker_id:
+        if user.role == "anm":
+            raise HTTPException(
+                status_code=400,
+                detail="Name the ASHA this patient belongs to",
+            )
+        return me
+
+    if user.role != "anm":
+        raise HTTPException(status_code=403, detail="You can only register your own patients")
+
+    owner = db.query(Worker).filter(Worker.worker_id == requested_worker_id).first()
+    if owner is None or owner.role != "asha" or owner.sub_centre_id != me.sub_centre_id:
+        # One message for "no such worker" and "not one of yours", so the
+        # endpoint cannot be used to discover which workers exist.
+        raise HTTPException(status_code=403, detail="That worker is not an ASHA in your sub-centre")
+    return owner
+
+
+def _validated_rch(value: str | None) -> str | None:
+    try:
+        return identity.normalise_rch(value)
+    except identity.InvalidRchNumber as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _reject_duplicates(db, *, rch: str | None, phone_hash: str | None, sub_centre_id: str | None) -> None:
+    """Refuse to register the same woman twice.
+
+    Two checks, deliberately different in reach.
+
+    The RCH number is issued by the health system and is unique across
+    the country, so a match anywhere is the same person -- even in another
+    district.
+
+    A phone number is not an identity. Households share one, a number gets
+    reissued, a daughter uses her mother's. Matching on it across a whole
+    district would block real registrations; matching within a sub-centre
+    catches the case that actually happens -- two ASHAs in neighbouring
+    hamlets registering the same pregnant woman -- and no more.
+
+    Both refuse rather than merge. Merging two patient records is a
+    clinical decision with a history attached, and it is not one an
+    endpoint should make on somebody's behalf at a doorstep.
+    """
+    if rch:
+        clash = db.query(Patient).filter(Patient.rch_number == rch).first()
+        if clash is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="That RCH number is already registered. Check the MCP card.",
+            )
+    if phone_hash and sub_centre_id:
+        clash = (
+            db.query(Patient)
+            .filter(Patient.phone_hash == phone_hash, Patient.sub_centre_id == sub_centre_id)
+            .first()
+        )
+        if clash is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="Somebody with this phone number is already registered in this sub-centre.",
+            )
 
 
 @router.get("", response_model=PatientDirectoryResponse)
@@ -235,7 +342,23 @@ def list_patients(
     db: DbSession,
     _user=Depends(require_roles("asha", "anm", "bmo", "admin")),
 ) -> PatientListResponse:
-    patients = db.query(Patient).filter(Patient.worker_id == worker_id).all()
+    # Her own patients, plus anyone she is standing in for today.
+    #
+    # Cover is the reason this is not a single equality any more. An ASHA
+    # away for a fortnight names a colleague (POST /workers/me/absence);
+    # while that window is open her patients appear on the colleague's
+    # list, marked, without ever ceasing to be hers.
+    visible = cover.visible_worker_ids(db, worker_id)
+    covering_names = (
+        {
+            w.worker_id: w.name
+            for w in db.query(Worker).filter(Worker.worker_id.in_(visible[1:])).all()
+        }
+        if len(visible) > 1
+        else {}
+    )
+
+    patients = db.query(Patient).filter(Patient.worker_id.in_(visible)).all()
     visit_counts = dict(
         db.query(Visit.patient_id, func.count(Visit.visit_id))
         .filter(Visit.patient_id.in_([p.patient_id for p in patients]))
@@ -274,6 +397,10 @@ def list_patients(
                 hours_overdue=priority.hours_overdue,
                 open_followups=open_count,
                 next_followup_due=next_due,
+                # Named, not just flagged. "Covering for Sunita" tells her
+                # whose patient this is and who to hand the story back to;
+                # a bare badge would leave her guessing at the doorstep.
+                covering_for=covering_names.get(p.worker_id),
             )
         )
 
@@ -300,7 +427,7 @@ def patient_history(
 
     worker = db.query(Worker).filter(Worker.worker_id == patient.worker_id).first()
 
-    if user.role == "asha" and patient.worker_id != user.worker_id:
+    if user.role == "asha" and patient.worker_id not in cover.visible_worker_ids(db, user.worker_id):
         raise HTTPException(status_code=403, detail="Not your patient")
     scope = get_supervisor_scope(user, db)
     if scope and (worker is None or worker.sub_centre_id != scope):
@@ -353,4 +480,134 @@ def patient_history(
         blood_sugar_random=patient.blood_sugar_random,
         registered_at=patient.created_at,
         visits=visits,
+    )
+
+
+def _reassign_guard(db, user, target_worker_id: str) -> tuple[Worker, Worker]:
+    """(me, the ASHA receiving the caseload), or a refusal.
+
+    An ANM moves patients within her own sub-centre and nowhere else. She
+    is the person who knows that Sunita has left and that Kavita now walks
+    those streets; she is not the person who should be able to move a
+    caseload into the next block.
+    """
+    me = db.query(Worker).filter(Worker.worker_id == user.worker_id).first()
+    if me is None:
+        raise HTTPException(status_code=401, detail="Your account no longer exists")
+
+    to_worker = db.query(Worker).filter(Worker.worker_id == target_worker_id).first()
+    if to_worker is None or to_worker.role != "asha":
+        raise HTTPException(status_code=404, detail="No such ASHA worker")
+    if to_worker.status != "active":
+        # Handing a caseload to an account that cannot log in is the same
+        # as losing it, and it would look like it worked.
+        raise HTTPException(status_code=400, detail="That worker's account is not active")
+    if user.role != "admin" and to_worker.sub_centre_id != me.sub_centre_id:
+        raise HTTPException(status_code=403, detail="That worker is outside your sub-centre")
+    return me, to_worker
+
+
+@router.post("/{patient_id}/reassign", response_model=ReassignResult)
+def reassign_patient(
+    patient_id: str,
+    payload: ReassignRequest,
+    db: DbSession,
+    user=Depends(require_roles("anm", "admin")),
+) -> ReassignResult:
+    """Move one patient to another ASHA."""
+    patient = db.query(Patient).filter(Patient.patient_id == patient_id).first()
+    if patient is None:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    me, to_worker = _reassign_guard(db, user, payload.to_worker_id)
+    if user.role != "admin":
+        current = db.query(Worker).filter(Worker.worker_id == patient.worker_id).first()
+        if current is None or current.sub_centre_id != me.sub_centre_id:
+            raise HTTPException(status_code=403, detail="That patient is outside your sub-centre")
+    if patient.worker_id == to_worker.worker_id:
+        raise HTTPException(status_code=400, detail="She is already with that worker")
+
+    previous = patient.worker_id
+    patient.worker_id = to_worker.worker_id
+    # sub_centre_id is deliberately untouched. The patient belongs to a
+    # place; only her carer changed.
+    db.commit()
+
+    audit_record(
+        db,
+        user_id=user.worker_id,
+        action_type="patient.reassign",
+        record_id=patient_id,
+        record_type="patient",
+        details={
+            "from_worker_id": previous,
+            "to_worker_id": to_worker.worker_id,
+            "reason": payload.reason.strip(),
+        },
+    )
+    return ReassignResult(
+        moved=1,
+        from_worker_id=previous,
+        to_worker_id=to_worker.worker_id,
+        to_worker_name=to_worker.name,
+    )
+
+
+@router.post("/caseload/{from_worker_id}/reassign", response_model=ReassignResult)
+def reassign_caseload(
+    from_worker_id: str,
+    payload: ReassignRequest,
+    db: DbSession,
+    user=Depends(require_roles("anm", "admin")),
+) -> ReassignResult:
+    """Move a whole caseload from one ASHA to another.
+
+    This is the gap that mattered. ASHAs leave, go on maternity leave, and
+    are replaced, and until now their patients simply became unreachable:
+    GET /patients/{worker_id} filters by worker_id, so nobody else could
+    see them and no visit could be recorded against them. A supervisor
+    could still read the names on her dashboard and could do nothing about
+    any of them.
+
+    In real life the register is physically handed to the next woman. This
+    is that, with a note saying why.
+    """
+    me, to_worker = _reassign_guard(db, user, payload.to_worker_id)
+    if from_worker_id == payload.to_worker_id:
+        raise HTTPException(status_code=400, detail="Those are the same worker")
+
+    from_worker = db.query(Worker).filter(Worker.worker_id == from_worker_id).first()
+    if from_worker is None:
+        raise HTTPException(status_code=404, detail="No such worker")
+    if user.role != "admin" and from_worker.sub_centre_id != me.sub_centre_id:
+        raise HTTPException(status_code=403, detail="That worker is outside your sub-centre")
+
+    patients = db.query(Patient).filter(Patient.worker_id == from_worker_id).all()
+    for patient in patients:
+        patient.worker_id = to_worker.worker_id
+    db.commit()
+
+    # One entry for the decision, not one per patient. A handover is a
+    # single act by a single person, and forty rows saying the same thing
+    # would bury the forty other things that happened that day.
+    audit_record(
+        db,
+        user_id=user.worker_id,
+        action_type="patient.reassign_caseload",
+        record_id=from_worker_id,
+        record_type="worker",
+        details={
+            "from_worker_id": from_worker_id,
+            "from_worker_name": from_worker.name,
+            "to_worker_id": to_worker.worker_id,
+            "to_worker_name": to_worker.name,
+            "patients_moved": len(patients),
+            "reason": payload.reason.strip(),
+        },
+    )
+    return ReassignResult(
+        moved=len(patients),
+        from_worker_id=from_worker_id,
+        to_worker_id=to_worker.worker_id,
+        to_worker_name=to_worker.name,
     )

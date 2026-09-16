@@ -74,6 +74,7 @@ def list_worker_stats(
         stats.append(
             WorkerStats(
                 worker_id=w.worker_id,
+                worker_code=w.worker_code,
                 name=w.name,
                 phone=w.phone,
                 sub_centre_id=w.sub_centre_id,
