@@ -799,6 +799,42 @@ table.data td.drivers {
   margin-bottom: var(--s3);
 }
 
+/* ── Risk heatmap (FR-08.1) ──────────────────────────────────────────── */
+
+/* A map needs real height to be legible, not "whatever's left after a
+   heading" the way a recharts card gets it -- so this overrides
+   .chart-card's flex sizing with a fixed height instead of inheriting
+   it, at a scale that reads on a projector as easily as a monitor. */
+.heatmap-card {
+  padding: var(--s4);
+}
+
+.heatmap-map {
+  height: 420px;
+  width: 100%;
+  border-radius: calc(var(--radius) - 4px);
+}
+
+.heatmap-loading {
+  height: 420px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--slate);
+  font-size: 13px;
+}
+
+/* Leaflet's own popup/tooltip chrome, restyled to match the rest of the
+   dashboard's tooltips rather than the library default. */
+.leaflet-tooltip {
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(16, 34, 28, 0.08);
+  font-size: 12.5px;
+  color: var(--ink);
+  padding: 6px 10px;
+}
+
 /* Recharts' default tooltip is a white box with a 1px grey border and
    the library's own type. Restyled here so it belongs to this product. */
 .recharts-default-tooltip {

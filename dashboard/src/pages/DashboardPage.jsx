@@ -5,12 +5,14 @@ import {
   fetchEscalations,
   fetchFollowupCompliance,
   fetchWorkers,
+  fetchHeatmap,
 } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import AppShell from "../components/AppShell";
 import StatStrip from "../components/StatStrip";
 import { Section } from "../components/Surface";
 import RiskBreakdownChart from "../components/RiskBreakdownChart";
+import RiskHeatmap from "../components/RiskHeatmap";
 import VisitsTrendChart from "../components/VisitsTrendChart";
 import FollowupStatusChart from "../components/FollowupStatusChart";
 import WorkerLeaderboardChart from "../components/WorkerLeaderboardChart";
@@ -42,6 +44,7 @@ export default function DashboardPage() {
   const isBmo = auth?.role === "bmo" || auth?.role === "admin";
 
   const [metrics, setMetrics] = useState(null);
+  const [heatmap, setHeatmap] = useState(null);
   const [analytics, setAnalytics] = useState(null);
   const [escalations, setEscalations] = useState([]);
   const [workers, setWorkers] = useState([]);
@@ -56,8 +59,9 @@ export default function DashboardPage() {
     activeRequest.current = controller;
     const options = { signal: controller.signal };
     try {
-      const [m, a, e, w, c] = await Promise.all([
+      const [m, h, a, e, w, c] = await Promise.all([
         fetchMetrics(options),
+        fetchHeatmap(options),
         fetchAnalytics(options),
         fetchEscalations(options),
         fetchWorkers(options),
@@ -65,6 +69,7 @@ export default function DashboardPage() {
       ]);
       if (controller.signal.aborted) return;
       setMetrics(m);
+      setHeatmap(h);
       setAnalytics(a);
       setEscalations(e);
       setWorkers(w);
@@ -131,6 +136,19 @@ export default function DashboardPage() {
           ]}
         />
       )}
+
+      {/* FR-08.1: the heatmap has to be the first thing on screen after
+          the four headline numbers -- it is the opening beat of the demo
+          script and the one view that answers "where" a supervisor
+          should look next, which none of the tables below it do. */}
+      <Section
+        title="Risk heatmap"
+        sub="Every village with a classified visit on record. Dot size is patient count; red is HIGH risk."
+      >
+        <div className="chart-card heatmap-card">
+          <RiskHeatmap points={heatmap} />
+        </div>
+      </Section>
 
       {analytics && (
         <Section title="Trends" sub="The shape of the four numbers above, over time and across the sub-centre.">

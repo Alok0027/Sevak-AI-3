@@ -106,8 +106,8 @@ export async function fetchAnalytics({ signal } = {}) {
   return data;
 }
 
-export async function fetchHeatmap() {
-  const { data } = await client.get("/api/v1/dashboard/heatmap");
+export async function fetchHeatmap({ signal } = {}) {
+  const { data } = await client.get("/api/v1/dashboard/heatmap", { signal });
   return data.risk_points;
 }
 
