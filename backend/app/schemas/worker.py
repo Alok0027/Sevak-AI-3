@@ -48,6 +48,14 @@ class PatientHistoryEntry(BaseModel):
     risk_override_reason: str | None = None
     overridden_by_name: str | None = None
     overridden_by_role: str | None = None  # asha | anm | bmo
+    # FR: a resolved HIGH case is a separate fact from an overridden risk
+    # level -- resolving keeps the historical risk_level as-is (see
+    # resolve_risk()) and just records that a supervisor reviewed and
+    # closed it out, with a mandatory note (no bare one-click resolve).
+    risk_resolved: bool = False
+    risk_resolution_note: str | None = None
+    resolved_by_name: str | None = None
+    resolved_at: datetime | None = None
 
 
 class WorkerHistoryResponse(BaseModel):

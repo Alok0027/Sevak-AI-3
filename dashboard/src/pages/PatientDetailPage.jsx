@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import { fetchPatientHistory, overrideRisk } from "../api/client";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import { fetchPatientHistory, overrideRisk, resolveRisk } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import AppShell from "../components/AppShell";
 import { Empty, RiskTag, Section } from "../components/Surface";
@@ -40,11 +40,43 @@ export default function PatientDetailPage() {
   const [overrideError, setOverrideError] = useState(null);
   const [overrideSubmitting, setOverrideSubmitting] = useState(false);
 
+  // Resolving an open HIGH case with a mandatory clinical-review note --
+  // same anm/bmo roles as override, but a separate action: it does not
+  // relabel the visit, it just closes the case out (see resolve-risk on
+  // the backend). Lives here, on the patient's own record, rather than as
+  // a bare button in the Overview escalation table.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [resolvingVisitId, setResolvingVisitId] = useState(null);
+  const [resolveNote, setResolveNote] = useState("");
+  const [resolveError, setResolveError] = useState(null);
+  const [resolveSubmitting, setResolveSubmitting] = useState(false);
+  const [autoResolveDone, setAutoResolveDone] = useState(false);
+
   useEffect(() => {
     fetchPatientHistory(patientId)
       .then(setData)
       .catch((err) => setError(err.response?.data?.detail || "Failed to load patient"));
   }, [patientId]);
+
+  // The Overview escalation list links straight into a specific visit's
+  // resolve form (?resolve=<visit_id>) instead of resolving inline itself
+  // -- see EscalationList. Honour that once the timeline has loaded, then
+  // drop the param so a cancel or later refresh doesn't keep reopening it.
+  useEffect(() => {
+    if (autoResolveDone || !data) return;
+    const targetId = searchParams.get("resolve");
+    if (targetId && data.visits.some((v) => v.visit_id === targetId)) {
+      setExpanded(targetId);
+      setResolvingVisitId(targetId);
+      setResolveNote("");
+      setResolveError(null);
+    }
+    setAutoResolveDone(true);
+    if (targetId) {
+      searchParams.delete("resolve");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [data, autoResolveDone, searchParams, setSearchParams]);
 
   function startOverride(e, visit) {
     e.stopPropagation();
@@ -52,6 +84,49 @@ export default function PatientDetailPage() {
     setOverrideLevel(RISK_LEVELS.find((l) => l !== visit.risk_level) || "MEDIUM");
     setOverrideReason("");
     setOverrideError(null);
+    setResolvingVisitId(null);
+  }
+
+  function startResolve(e, visit) {
+    e.stopPropagation();
+    setResolvingVisitId(visit.visit_id);
+    setResolveNote("");
+    setResolveError(null);
+    setOverridingVisitId(null);
+  }
+
+  function cancelResolve(e) {
+    e.stopPropagation();
+    setResolvingVisitId(null);
+    setResolveError(null);
+  }
+
+  async function submitResolve(e, visitId) {
+    e.stopPropagation();
+    setResolveSubmitting(true);
+    setResolveError(null);
+    try {
+      await resolveRisk(visitId, resolveNote);
+      const note = resolveNote.trim();
+      setData((prev) => ({
+        ...prev,
+        visits: prev.visits.map((v) =>
+          v.visit_id === visitId
+            ? {
+                ...v,
+                risk_resolved: true,
+                risk_resolution_note: note,
+                resolved_by_name: auth?.workerName || v.resolved_by_name,
+              }
+            : v,
+        ),
+      }));
+      setResolvingVisitId(null);
+    } catch (err) {
+      setResolveError(err.response?.data?.detail || "Could not resolve this risk.");
+    } finally {
+      setResolveSubmitting(false);
+    }
   }
 
   function cancelOverride(e) {
@@ -190,6 +265,7 @@ export default function PatientDetailPage() {
             {data.visits.map((v) => {
               const isOpen = expanded === v.visit_id;
               const isOverriding = overridingVisitId === v.visit_id;
+              const isResolving = resolvingVisitId === v.visit_id;
               return (
                 <div key={v.visit_id} className={`visit tone-${(v.risk_level || "low").toLowerCase()}`}>
                   <span className="visit-rail" aria-hidden="true" />
@@ -205,9 +281,14 @@ export default function PatientDetailPage() {
                     >
                       <span className="visit-when">{new Date(v.created_at).toLocaleString()}</span>
                       <RiskTag level={v.risk_level} />
-                      {canOverride && !isOverriding && (
+                      {canOverride && !isOverriding && !isResolving && !v.risk_resolved && (
                         <button className="override-btn" onClick={(e) => startOverride(e, v)}>
                           Override risk
+                        </button>
+                      )}
+                      {canOverride && !isOverriding && !isResolving && v.risk_level === "HIGH" && !v.risk_resolved && (
+                        <button className="override-btn" onClick={(e) => startResolve(e, v)}>
+                          Resolve after clinical review
                         </button>
                       )}
                       {v.extracted && (
@@ -229,6 +310,44 @@ export default function PatientDetailPage() {
                           {v.overridden_by_role ? ` (${v.overridden_by_role.toUpperCase()})` : ""}
                         </strong>
                         {v.risk_override_reason && <div className="muted">“{v.risk_override_reason}”</div>}
+                      </div>
+                    )}
+
+                    {v.risk_resolved && (
+                      <div className="human-note">
+                        <strong>Resolved after clinical review by {v.resolved_by_name || "a supervisor"}</strong>
+                        {v.risk_resolution_note && <div className="muted">“{v.risk_resolution_note}”</div>}
+                      </div>
+                    )}
+
+                    {isResolving && (
+                      <div className="override-form" onClick={(e) => e.stopPropagation()}>
+                        <label htmlFor={`resolve-note-${v.visit_id}`}>
+                          Clinical review note (required, at least 10 characters, kept in the audit trail)
+                        </label>
+                        <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+                          This does not change the recorded risk classification above -- it just records that
+                          the case was reviewed and why it's being closed out.
+                        </p>
+                        <textarea
+                          id={`resolve-note-${v.visit_id}`}
+                          value={resolveNote}
+                          onChange={(e) => setResolveNote(e.target.value)}
+                          placeholder="e.g. Called the patient directly, BP retest was normal -- referred her to the PHC as a precaution."
+                        />
+                        {resolveError && <p className="error">{resolveError}</p>}
+                        <div className="override-actions">
+                          <button className="btn-quiet" onClick={cancelResolve} disabled={resolveSubmitting}>
+                            Cancel
+                          </button>
+                          <button
+                            className="btn-submit"
+                            onClick={(e) => submitResolve(e, v.visit_id)}
+                            disabled={resolveSubmitting || resolveNote.trim().length < 10}
+                          >
+                            {resolveSubmitting ? "Saving…" : "Save & resolve"}
+                          </button>
+                        </div>
                       </div>
                     )}
 

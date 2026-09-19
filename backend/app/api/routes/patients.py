@@ -17,6 +17,7 @@ from app.core.config import get_settings
 from app.db.models.action import Action
 from app.db.models.patient import Patient
 from app.db.models.risk_flag import RiskFlag
+from app.db.models.risk_resolution import RiskResolution
 from app.db.models.visit import Visit
 from app.db.models.worker import Worker
 from app.schemas.patient import (
@@ -40,6 +41,7 @@ from app.services.bhashini_client import get_bhashini_client
 # visit's risk level (could be a different ASHA, or her ANM/BMO) are two
 # different rows in the same table.
 OverridingWorker = aliased(Worker)
+ResolvingWorker = aliased(Worker)
 
 router = APIRouter(prefix="/api/v1/patients", tags=["patients"])
 
@@ -436,9 +438,11 @@ def patient_history(
         raise HTTPException(status_code=403, detail="Patient is outside your sub-centre")
 
     rows = (
-        db.query(Visit, RiskFlag, OverridingWorker)
+        db.query(Visit, RiskFlag, OverridingWorker, RiskResolution, ResolvingWorker)
         .outerjoin(RiskFlag, RiskFlag.visit_id == Visit.visit_id)
         .outerjoin(OverridingWorker, OverridingWorker.worker_id == RiskFlag.overridden_by)
+        .outerjoin(RiskResolution, RiskResolution.visit_id == Visit.visit_id)
+        .outerjoin(ResolvingWorker, ResolvingWorker.worker_id == RiskResolution.resolved_by)
         .filter(Visit.patient_id == patient_id)
         .order_by(Visit.created_at.desc())
         .all()
@@ -456,8 +460,12 @@ def patient_history(
             risk_override_reason=rf.override_reason if rf else None,
             overridden_by_name=ow.name if ow else None,
             overridden_by_role=ow.role if ow else None,
+            risk_resolved=res is not None,
+            risk_resolution_note=res.note if res else None,
+            resolved_by_name=resw.name if resw else None,
+            resolved_at=res.resolved_at if res else None,
         )
-        for v, rf, ow in rows
+        for v, rf, ow, res, resw in rows
     ]
     audit_record(
         db,
