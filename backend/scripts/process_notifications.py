@@ -12,12 +12,12 @@ from app.db.session import SessionLocal, init_db
 from app.db.models.action import Action
 from app.db.models.risk_flag import RiskFlag
 from app.db.models.notification import Notification
-from app.agents.agent5_escalation import check_and_escalate, _supervisor_for
+from app.agents.agent5_escalation import ALERT_ACTION_TYPES, check_and_escalate, _supervisor_for
 from app.services.notifications import deliver_due
 
 async def run_once(db, settings):
     check_and_escalate(db)
-    actions = db.query(Action).filter(Action.type == "escalation_alert", Action.status == "pending").limit(100).all()
+    actions = db.query(Action).filter(Action.type.in_(ALERT_ACTION_TYPES), Action.status == "pending").limit(100).all()
     for action in actions:
         if db.get(Notification, action.action_id):
             continue

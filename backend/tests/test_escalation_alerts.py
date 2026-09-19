@@ -18,6 +18,7 @@ import pytest
 
 from app.agents.agent5_escalation import (
     ESCALATION_THRESHOLD_HOURS,
+    build_immediate_alert,
     check_and_escalate,
     deliver_escalation_alerts,
 )
@@ -159,3 +160,60 @@ def test_a_sub_centre_with_no_anm_falls_back_to_the_bmo(db):
     alerts = _alerts_for(db, flag)
     assert alerts, "no ANM meant no alert at all"
     assert "BMO" in alerts[0].content
+
+
+def test_immediate_alert_is_built_for_a_fresh_high_flag(db):
+    """FR-03.4: the ANM has to hear about a HIGH case within 60 seconds --
+    no 48-hour wait, no follow-up requirement. A flag raised moments ago
+    still gets one."""
+    flag = _stale_high_flag(db, hours_old=0)
+    alert = build_immediate_alert(db, flag)
+    assert alert is not None
+    assert alert.type == "immediate_alert"
+    assert "Kamla Devi" in alert.content
+    assert "ANM" in alert.content
+    assert alert.status == "pending"
+
+
+def test_immediate_alert_and_escalation_alert_do_not_suppress_each_other(db):
+    """A case can get the immediate alert now and the 48-hour one later if
+    it is still untouched -- building one must not count against the
+    other's guard, and both must be able to exist on the same visit."""
+    flag = _stale_high_flag(db)  # already past the 48h threshold
+    immediate = build_immediate_alert(db, flag)
+    db.add(immediate)
+    db.commit()
+
+    escalated = check_and_escalate(db)
+    assert flag.flag_id in escalated, "the 48-hour escalation must still fire"
+
+    alerts = db.query(Action).filter(Action.visit_id == flag.visit_id).all()
+    assert sorted(a.type for a in alerts) == ["escalation_alert", "immediate_alert"]
+
+
+def test_deliver_escalation_alerts_sends_the_immediate_alert_too(db):
+    class _Recording(SmsClientBase):
+        def __init__(self):
+            self.sent = []
+
+        async def send_message(self, to, body):
+            self.sent.append(body)
+            return {"status": "sent"}
+
+    flag = _stale_high_flag(db, hours_old=0)
+    alert = build_immediate_alert(db, flag)
+    db.add(alert)
+    db.commit()
+
+    sms = _Recording()
+    assert asyncio.run(deliver_escalation_alerts(db, sms_client=sms)) >= 1
+    db.refresh(alert)
+    assert alert.status == "sent"
+    assert any("Kamla Devi" in body for body in sms.sent)
+
+
+def test_immediate_alert_falls_back_to_bmo_with_no_anm(db):
+    flag = _stale_high_flag(db, hours_old=0, with_anm=False)
+    alert = build_immediate_alert(db, flag)
+    assert alert is not None
+    assert "BMO" in alert.content

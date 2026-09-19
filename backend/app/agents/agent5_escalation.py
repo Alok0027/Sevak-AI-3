@@ -1,16 +1,27 @@
-"""Agent 5 -- Escalation (FR-06).
+"""Agent 5 -- Escalation (FR-06, FR-03.4).
 
 Not a node in the per-visit graph: a monitor that fires when a HIGH risk
-flag has sat unactioned past 48 hours.
+flag has sat unactioned past 48 hours -- plus, separately, an immediate
+alert fired the moment a visit classifies HIGH at all.
 
-Two halves, because they used to be one and it was the wrong one.
+Two different requirements, two different clocks, deliberately not merged:
 
-`check_and_escalate` marks the flag and writes an `escalation_alert`
-action naming the supervisor who needs to know. `deliver_escalation_alerts`
-sends those. Before this split, escalation set a timestamp column and
-stopped -- the ANM found out only if she happened to open the dashboard,
-which for a patient who has been HIGH and untouched for two days is not a
-mechanism, it is a hope.
+  FR-03.4 -- the ANM hears about a HIGH case within 60 seconds, full stop,
+  whether or not a follow-up ever gets recorded. This is `immediate_alert`,
+  built and sent synchronously inside the same request that created the
+  visit (see visit_pipeline.run_voice_visit) -- a 60-second target cannot
+  be met by a worker that ticks once a minute, so this one does not wait
+  for one.
+
+  FR-06.1 -- if a HIGH case is *still* unactioned 48 hours later, the BMO
+  (or ANM) gets paged again. This is `escalation_alert`, built by
+  `check_and_escalate` and left pending for the independent outbox worker
+  (scripts.process_notifications) to deliver -- a two-day threshold has no
+  need to be synchronous, and tying it to the request path would mean a
+  district where nobody visits a patient for two days never escalates.
+
+`deliver_escalation_alerts` sends whichever of the two is pending; the
+caller decides synchronous vs deferred by choosing when to call it.
 
 An action row rather than a new column on risk_flags, deliberately: the
 actions table already carries status/sent_at and is already rendered in
@@ -18,13 +29,6 @@ the visit timeline, so an alert that failed to send is visible in the same
 place as a referral that failed to send. It also means no schema change,
 which matters because this project has no migrations yet (see the
 deployment section of the top-level README).
-
-When it runs: on every completed visit (visit_pipeline) and whenever a
-supervisor loads the escalations list. Deliberately not a scheduler --
-adding APScheduler to a web process that sleeps on a free tier gives you a
-cron that stops running when nobody is looking, which is the failure this
-is fixing. Piggy-backing on ASHA activity means the check runs whenever
-anyone in the district is working.
 """
 import logging
 from datetime import datetime, timedelta, timezone
@@ -41,6 +45,11 @@ from app.services.sms_client import MockSmsClient
 logger = logging.getLogger(__name__)
 
 ESCALATION_THRESHOLD_HOURS = 48
+
+# The two alert action types this module produces -- see the module
+# docstring for why immediate and 48h-unactioned are kept separate rather
+# than one type with two triggers.
+ALERT_ACTION_TYPES = ("escalation_alert", "immediate_alert")
 
 
 def check_and_escalate(db: Session) -> list[str]:
@@ -122,18 +131,47 @@ def _build_alert(db: Session, flag: RiskFlag) -> Action | None:
     )
 
 
+def build_immediate_alert(db: Session, flag: RiskFlag) -> Action | None:
+    """FR-03.4: one pending immediate_alert for a HIGH flag just raised.
+
+    Distinct action type from `_build_alert`'s escalation_alert (see the
+    module docstring): this one is not gated by escalated_at or the
+    48-hour threshold at all, because it fires once, right away, for every
+    HIGH classification -- a case can get this alert now and the 48-hour
+    one later if it is still untouched, and the two must not suppress or
+    double-count each other.
+    """
+    supervisor = _supervisor_for(db, flag)
+    if supervisor is None:
+        logger.warning("flag %s classified HIGH with no ANM or BMO to notify", flag.flag_id)
+        return None
+    visit = db.query(Visit).filter(Visit.visit_id == flag.visit_id).first()
+    patient = db.query(Patient).filter(Patient.patient_id == visit.patient_id).first() if visit else None
+    name = patient.name if patient else "a patient"
+    return Action(
+        visit_id=flag.visit_id,
+        type="immediate_alert",
+        content=(
+            f"{name} was just flagged HIGH risk. {supervisor.name} "
+            f"({supervisor.role.upper()}) should review this as soon as possible."
+        ),
+        status="pending",
+    )
+
+
 async def deliver_escalation_alerts(db: Session, whatsapp_client=None, sms_client=None) -> int:
-    """Send every pending escalation_alert. Returns how many went out.
+    """Send every pending alert -- both immediate_alert and escalation_alert.
+    Returns how many went out.
 
     Failures are recorded on the action as status "failed" rather than
-    raised: this runs at the tail of a visit, and a supervisor's phone
-    being unreachable must not fail the ASHA's visit. The row stays
-    visible, so a persistent failure shows up as a column of "failed"
-    alerts rather than as silence.
+    raised: this can run at the tail of a visit (see visit_pipeline), and a
+    supervisor's phone being unreachable must not fail the ASHA's visit.
+    The row stays visible, so a persistent failure shows up as a column of
+    "failed" alerts rather than as silence.
     """
     pending = (
         db.query(Action)
-        .filter(Action.type == "escalation_alert", Action.status == "pending")
+        .filter(Action.type.in_(ALERT_ACTION_TYPES), Action.status == "pending")
         .all()
     )
     if not pending:

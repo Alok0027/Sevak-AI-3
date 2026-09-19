@@ -19,7 +19,7 @@ from app.db.models.action import Action
 from app.db.models.patient import Patient
 from app.db.models.risk_flag import RiskFlag
 from app.db.models.visit import Visit
-from app.agents.agent5_escalation import check_and_escalate, deliver_escalation_alerts
+from app.agents.agent5_escalation import build_immediate_alert, check_and_escalate, deliver_escalation_alerts
 from app.schemas.visit import ExtractedFields, RiskDriver, VoiceVisitResponse
 from app.services.audit import record as audit_record
 from app.services.bhashini_client import get_bhashini_client
@@ -143,12 +143,29 @@ async def run_voice_visit(
         receipt.response_json = response.model_dump_json()
     db.commit()  # Visit, actions, risk flag and replay response become durable together.
 
-    # FR-06: run the 48-hour escalation check here rather than only when a
+    # FR-03.4: a HIGH classification pages the ANM within 60 seconds, no
+    # follow-up required and no waiting for a background worker -- a
+    # target that measured in seconds cannot be met by a cron that ticks
+    # once a minute, so this sends inline, in the same request. Wrapped
+    # the same way the 48-hour check below is: a supervisor's unreachable
+    # phone must not fail the ASHA's visit.
+    if risk_level == "HIGH":
+        try:
+            alert = build_immediate_alert(db, risk_flag)
+            if alert is not None:
+                db.add(alert)
+                db.commit()
+                await deliver_escalation_alerts(db, whatsapp_client, sms_client)
+        except Exception:  # noqa: BLE001 -- see above
+            logger.exception("immediate HIGH-risk alert failed after visit %s", visit.visit_id)
+
+    # FR-06.1: run the 48-hour escalation check here rather than only when a
     # supervisor opens the dashboard. A patient who has been HIGH and
     # untouched for two days should not depend on someone happening to look,
     # and this is the one code path guaranteed to run while anyone in the
     # district is working. The check is a single indexed query; the send is
-    # wrapped so an unreachable supervisor cannot fail this ASHA's visit.
+    # deferred to the independent outbox worker -- see agent5_escalation's
+    # module docstring for why the two alerts don't share a clock.
     try:
         escalated = check_and_escalate(db)
         # Delivery belongs to the independent outbox worker, never this request.

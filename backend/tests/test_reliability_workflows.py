@@ -78,6 +78,35 @@ def test_concurrent_visit_claim_has_only_one_winner():
     with SessionLocal() as db:
         assert db.query(Visit).filter(Visit.patient_id == patient).count() == 1
 
+def test_high_risk_visit_fires_immediate_alert_inline(monkeypatch):
+    """FR-03.4: a HIGH classification has to page the ANM within 60 seconds --
+    not "eventually, once a scheduler ticks." run_voice_visit is the one
+    request-path entry point every voice visit goes through, so proving the
+    immediate_alert Action exists right after it returns (no cron, no extra
+    call) is what actually pins the 60-second requirement, as opposed to the
+    unit tests in test_escalation_alerts.py which only prove
+    build_immediate_alert works in isolation."""
+    users, patient = fixture_data()
+    sent = []
+
+    class RecordingSms:
+        async def send_message(self, phone, content):
+            sent.append(content)
+            return {'sid': 'test-immediate'}
+
+    monkeypatch.setattr('app.services.visit_pipeline.get_sms_client', lambda settings: RecordingSms())
+    with SessionLocal() as db:
+        result = asyncio.run(run_voice_visit(
+            db, get_settings().model_copy(update={'sms_provider': 'real'}), users[0], patient,
+            confirmed_transcript='BP reading taken', client_request_id=str(uuid4()),
+            confirmed_extracted=ExtractedFields(bp_systolic=180, bp_diastolic=120)))
+        assert result.risk_level == 'HIGH'
+        alerts = db.query(Action).filter(Action.visit_id == result.visit_id, Action.type == 'immediate_alert').all()
+        assert len(alerts) == 1, "run_voice_visit must create exactly one immediate_alert for a fresh HIGH visit"
+        assert alerts[0].status == 'sent'
+        assert sent, "the immediate alert must be delivered inline, not left for a background worker"
+
+
 def test_meta_preview_and_delivery_use_same_template_parameters(monkeypatch):
     users, patient = fixture_data()
     settings = get_settings().model_copy(update={'whatsapp_provider':'meta', 'whatsapp_template_name':'followup_reminder', 'whatsapp_template_language':'hi'})

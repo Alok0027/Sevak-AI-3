@@ -20,6 +20,7 @@ from app.db.models.visit import Visit
 from app.db.models.worker import Worker
 from app.agents import agent1_voice_comprehension as agent1
 from app.agents.agent3_action_generation import DEFAULT_PHC, FOLLOWUP_DAYS
+from app.agents.agent5_escalation import ALERT_ACTION_TYPES
 from app.schemas.visit import (
     ExtractRequest,
     ExtractResponse,
@@ -52,13 +53,14 @@ class ResolveRiskRequest(BaseModel):
 def _cancel_pending_escalations(db, visit_id: str) -> None:
     """Withdraw any not-yet-delivered escalation alert for this visit.
 
+    Covers both immediate_alert (FR-03.4) and escalation_alert (FR-06.1).
     Shared by resolve-risk and a downgrading risk-override: both are ways
     a visit stops being an open HIGH case, and either way an ANM should
     not be paged about a risk level that is no longer current. An alert
     already sent is left alone -- it already happened and the audit trail
     should say so, not pretend it didn't.
     """
-    for action in db.query(Action).filter(Action.visit_id == visit_id, Action.type == "escalation_alert").all():
+    for action in db.query(Action).filter(Action.visit_id == visit_id, Action.type.in_(ALERT_ACTION_TYPES)).all():
         notification = db.get(Notification, action.action_id)
         if notification is not None and notification.status in ("queued", "retry"):
             notification.status = "cancelled"
