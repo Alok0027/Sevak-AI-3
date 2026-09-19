@@ -25,6 +25,73 @@ def build_visit_contribution(extracted: ExtractedFields, risk_level: str) -> dic
     }
 
 
+def build_rch_register(db: Session, worker_id: str, month: int, year: int) -> list[dict]:
+    """FR-05.2: the RCH register itself -- one row per *patient* who had a
+    maternal or under-5 visit in this period, with the fields a real
+    register carries (her name, RCH number, category, ANC visit count,
+    latest risk, last visit date). Not a count: a count is what this used
+    to be (`rch_register_entries` incremented once per matching visit,
+    with nothing behind it to look up), which satisfies nobody asking
+    "which patients, and what's her status" -- the actual acceptance
+    criterion (SRS FR-05.2: "auto-populated for all maternal patients").
+
+    "RCH-eligible" mirrors build_visit_contribution's own definition
+    (pregnant, or age < 5) so this register and the HMIS totals it feeds
+    never disagree about who counts.
+    """
+    visits = (
+        db.query(Visit)
+        .filter(
+            Visit.worker_id == worker_id,
+            sql_extract("month", Visit.created_at) == month,
+            sql_extract("year", Visit.created_at) == year,
+        )
+        .order_by(Visit.created_at)
+        .all()
+    )
+
+    by_patient: dict[str, dict] = {}
+    for v in visits:
+        if not v.structured_json:
+            continue
+        extracted = json.loads(v.structured_json)
+        pregnancy_stage = extracted.get("pregnancy_stage")
+        age = extracted.get("age")
+        is_maternal = bool(pregnancy_stage)
+        is_child = age is not None and age < 5
+        if not (is_maternal or is_child):
+            continue
+        entry = by_patient.setdefault(v.patient_id, {
+            "patient_id": v.patient_id,
+            "category": "maternal" if is_maternal else "child",
+            "anc_visits": 0,
+            "last_visit_at": None,
+            "last_risk_level": None,
+            "pregnancy_stage": None,
+        })
+        entry["anc_visits"] += 1
+        entry["last_visit_at"] = v.created_at.isoformat()
+        entry["last_risk_level"] = v.risk_level
+        if pregnancy_stage:
+            entry["pregnancy_stage"] = pregnancy_stage
+
+    if not by_patient:
+        return []
+
+    patients = {p.patient_id: p for p in db.query(Patient).filter(Patient.patient_id.in_(by_patient.keys())).all()}
+    register = []
+    for patient_id, entry in by_patient.items():
+        patient = patients.get(patient_id)
+        register.append({
+            **entry,
+            "patient_name": patient.name if patient else "Unknown",
+            "rch_number": patient.rch_number if patient else None,
+            "village": patient.village if patient else None,
+        })
+    register.sort(key=lambda r: r["last_visit_at"] or "", reverse=True)
+    return register
+
+
 def regenerate_monthly_report(db: Session, worker_id: str, month: int, year: int) -> HmisReport:
     """Aggregate every visit this worker recorded in (month, year) into the
     HMIS-format monthly totals (FR-05.1) and RCH register fields (FR-05.2).
@@ -51,7 +118,6 @@ def regenerate_monthly_report(db: Session, worker_id: str, month: int, year: int
     unassessed = sum(1 for v in visits if v.risk_level == "UNASSESSED")
 
     anc_visits = 0
-    rch_entries = 0
     non_compliance_count = 0
     for v in visits:
         if not v.structured_json:
@@ -59,17 +125,22 @@ def regenerate_monthly_report(db: Session, worker_id: str, month: int, year: int
         extracted = json.loads(v.structured_json)
         if extracted.get("pregnancy_stage"):
             anc_visits += 1
-            rch_entries += 1
         if extracted.get("medication_compliance") == "non_compliant":
             non_compliance_count += 1
 
     unique_patients = len({v.patient_id for v in visits})
+    rch_register = build_rch_register(db, worker_id, month, year)
 
     data = {
         "total_home_visits": total_visits,
         "unique_patients_visited": unique_patients,
         "anc_visits_recorded": anc_visits,
-        "rch_register_entries": rch_entries,
+        # The count now comes from the register itself -- one row per
+        # eligible patient -- instead of being tallied separately from a
+        # slightly different rule (this used to count maternal visits
+        # only, so it silently excluded every under-5 child).
+        "rch_register_entries": len(rch_register),
+        "rch_register": rch_register,
         "high_risk_cases": high_risk,
         "medium_risk_cases": medium_risk,
         "low_risk_cases": low_risk,
