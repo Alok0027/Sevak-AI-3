@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import aliased
 
-from app.api.deps import DbSession, get_supervisor_scope, require_roles
+from app.api.deps import DbSession, get_supervisor_scope, require_roles, require_worker_access
 from app.core.config import get_settings
 from app.db.models.action import Action
 from app.db.models.patient import Patient
@@ -170,6 +170,7 @@ def _resolve_owner(db, user, requested_worker_id: str | None) -> Worker:
     worker who could file patients onto a colleague's list could also
     quietly empty her own.
     """
+    get_supervisor_scope(user, db)  # fail closed for an unassigned ANM
     me = db.query(Worker).filter(Worker.worker_id == user.worker_id).first()
     if me is None:
         raise HTTPException(status_code=401, detail="Your account no longer exists")
@@ -342,6 +343,7 @@ def list_patients(
     db: DbSession,
     _user=Depends(require_roles("asha", "anm", "bmo", "admin")),
 ) -> PatientListResponse:
+    require_worker_access(_user, db, worker_id)
     # Her own patients, plus anyone she is standing in for today.
     #
     # Cover is the reason this is not a single equality any more. An ASHA
@@ -491,6 +493,7 @@ def _reassign_guard(db, user, target_worker_id: str) -> tuple[Worker, Worker]:
     those streets; she is not the person who should be able to move a
     caseload into the next block.
     """
+    get_supervisor_scope(user, db)
     me = db.query(Worker).filter(Worker.worker_id == user.worker_id).first()
     if me is None:
         raise HTTPException(status_code=401, detail="Your account no longer exists")

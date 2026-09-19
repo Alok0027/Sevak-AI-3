@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'notification_screen.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
@@ -71,7 +72,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: T.paper,
-      appBar: AppBar(title: Text(tr(context, 'profile'))),
+      appBar: AppBar(title: Text(tr(context, 'profile')), actions: [
+        IconButton(tooltip: 'Patient notifications', icon: const Icon(Icons.mark_chat_unread_outlined),
+          onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => NotificationScreen(api: widget.api)))),
+      ]),
       body: FutureBuilder<Map<String, dynamic>>(
         future: _profile,
         builder: (context, snap) {

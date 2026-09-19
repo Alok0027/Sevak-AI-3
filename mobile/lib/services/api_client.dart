@@ -37,6 +37,25 @@ class ApiClient {
   ApiClient({String? baseUrl}) : baseUrl = baseUrl ?? _defaultBaseUrl;
 
   void setToken(String token) => _token = token;
+  void clearToken() => _token = null;
+
+  Future<List<dynamic>> notificationInbox() async {
+    final response = await http.get(Uri.parse('$baseUrl/api/v1/notifications'), headers: _headers);
+    if (response.statusCode != 200) throw ApiException('Could not load notifications');
+    return jsonDecode(response.body)['notifications'] as List<dynamic>;
+  }
+
+  Future<Map<String, dynamic>> notificationPreview(String id, String channel) async {
+    final response = await http.get(Uri.parse('$baseUrl/api/v1/notifications/$id/preview?channel=$channel'), headers: _headers);
+    if (response.statusCode != 200) throw ApiException(response.body);
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  Future<void> approveNotification(String id, String channel, String previewHash) async {
+    final response = await http.post(Uri.parse('$baseUrl/api/v1/notifications/$id/approve'), headers: _headers,
+        body: jsonEncode({'channel': channel, 'preview_hash': previewHash, 'consent_confirmed': true}));
+    if (response.statusCode != 200) throw ApiException(response.body);
+  }
 
   Map<String, String> get _headers => {
         'Content-Type': 'application/json',
@@ -355,6 +374,7 @@ class ApiClient {
     String? audioBase64,
     String? confirmedTranscript,
     Map<String, dynamic>? confirmedExtracted,
+    String? clientRequestId,
   }) async {
     assert(audioBase64 != null || confirmedTranscript != null);
     final resp = await http.post(
@@ -367,6 +387,7 @@ class ApiClient {
         if (audioBase64 != null) 'audio_base64': audioBase64,
         if (confirmedTranscript != null) 'confirmed_transcript': confirmedTranscript,
         if (confirmedExtracted != null) 'confirmed_extracted': confirmedExtracted,
+        if (clientRequestId != null) 'client_request_id': clientRequestId,
       }),
     );
     if (resp.statusCode != 200) {

@@ -18,6 +18,8 @@ dependencies:
   path: ^1.9.0
   path_provider: ^2.1.3
   shared_preferences: ^2.2.3    # JWT + logged-in worker_id persistence
+  flutter_secure_storage: ^10.0.0
+  cryptography: ^2.7.0
   connectivity_plus: ^6.0.3     # offline/online detection for the sync indicator
   record: ^6.2.1                # microphone recording (5.x pinned an inconsistent record_linux/record_platform_interface pair)
   intl: ^0.20.3                 # date formatting for task list. Pinned to
@@ -34,6 +36,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  sqflite_common_ffi: ^2.3.6
 
 flutter:
   uses-material-design: true

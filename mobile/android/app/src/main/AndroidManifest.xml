@@ -11,6 +11,7 @@
          It said "sevakai_mobile", the Flutter project directory name,
          which is not a thing anyone outside this repo has heard of. -->
     <application
+        android:allowBackup="false"
         android:label="SevakAI"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"

@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSortableData } from "../hooks/useSortableData";
 import { Empty } from "./Surface";
+import { resolveRisk } from "../api/client";
+import { useAuth } from "../context/AuthContext";
 
 /** FR-06.2: unactioned HIGH risk cases -- enriched with patient/worker
  * context and the actual clinical drivers, not just a bare name.
@@ -14,6 +16,22 @@ import { Empty } from "./Surface";
 export default function EscalationList({ escalations, showSubCentre }) {
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState(null);
+  const { auth } = useAuth();
+  const [resolved, setResolved] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState(null);
+  async function resolve(visitId) {
+    const note = window.prompt('Document the clinical review and reason for resolving this risk (at least 10 characters). This does not change the recorded risk classification.');
+    if (!note || busy) return;
+    setBusy(true);
+    try {
+      await resolveRisk(visitId, note);
+      setResolved((items) => [...items, visitId]);
+      setFailure(null);
+    } catch (error) {
+      setFailure(error.response?.data?.detail || 'Could not resolve this risk');
+    } finally { setBusy(false); }
+  }
   const { sorted, sortKey, direction, requestSort } = useSortableData(escalations, "hours_elapsed", "desc");
 
   if (escalations.length === 0) {
@@ -29,6 +47,7 @@ export default function EscalationList({ escalations, showSubCentre }) {
 
   return (
     <div className="table-wrap">
+      {failure && <p role="alert">{typeof failure === 'string' ? failure : 'Please check the resolution note.'}</p>}
       <div className="table-scroll">
         <table className="data">
           <thead>
@@ -42,7 +61,7 @@ export default function EscalationList({ escalations, showSubCentre }) {
             </tr>
           </thead>
           <tbody>
-            {sorted.map((e) => {
+            {sorted.filter((e) => !resolved.includes(e.visit_id)).map((e) => {
               const isOpen = expanded === e.visit_id;
               const escalated = e.hours_elapsed >= 48;
               return (
@@ -91,6 +110,8 @@ export default function EscalationList({ escalations, showSubCentre }) {
                     {escalated && <div className="cell-sub">past 48h</div>}
                   </td>
                   <td className="drivers">
+                    {['anm', 'bmo'].includes(auth?.role) && <button className="btn-quiet" disabled={busy}
+                      onClick={(event) => { event.stopPropagation(); resolve(e.visit_id); }}>Resolve after clinical review</button>}
                     {isOpen ? (
                       e.drivers.length > 0 ? (
                         <>

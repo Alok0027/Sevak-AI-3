@@ -42,7 +42,7 @@ export const apiConfigProblem = (() => {
   return null;
 })();
 
-const client = axios.create({ baseURL: apiBaseUrl });
+const client = axios.create({ baseURL: apiBaseUrl, timeout: 60_000 });
 
 // Fail with the real reason rather than letting axios attempt a call that
 // cannot work and reporting it as a generic network error.
@@ -91,13 +91,18 @@ export async function login(phone, pin) {
   return data;
 }
 
-export async function fetchMetrics() {
-  const { data } = await client.get("/api/v1/dashboard/metrics");
+export async function fetchMetrics({ signal } = {}) {
+  const { data } = await client.get("/api/v1/dashboard/metrics", { signal });
   return data;
 }
 
-export async function fetchAnalytics() {
-  const { data } = await client.get("/api/v1/dashboard/analytics");
+export async function resolveRisk(visitId, note) {
+  const { data } = await client.post(`/api/v1/visits/${visitId}/resolve-risk`, { note });
+  return data;
+}
+
+export async function fetchAnalytics({ signal } = {}) {
+  const { data } = await client.get("/api/v1/dashboard/analytics", { signal });
   return data;
 }
 
@@ -109,19 +114,20 @@ export async function fetchHeatmap() {
 // FR-08 accountability: the row-level answer behind the follow-up chart --
 // which ASHA owes which patient a visit, and how far past the deadline
 // Agent 3 set for that patient's risk level.
-export async function fetchFollowupCompliance() {
-  const { data } = await client.get("/api/v1/dashboard/followup-compliance");
+export async function fetchFollowupCompliance({ signal } = {}) {
+  const { data } = await client.get("/api/v1/dashboard/followup-compliance", { signal });
   return data;
 }
 
-export async function fetchEscalations() {
-  const { data } = await client.get("/api/v1/escalations/pending");
+export async function fetchEscalations({ signal } = {}) {
+  const { data } = await client.get("/api/v1/escalations/pending", { signal });
   return data.escalations;
 }
 
-export async function fetchWorkers({ subCentreId, search } = {}) {
+export async function fetchWorkers({ subCentreId, search, signal } = {}) {
   const { data } = await client.get("/api/v1/workers", {
     params: { sub_centre_id: subCentreId || undefined, search: search || undefined },
+    signal,
   });
   return data.workers;
 }

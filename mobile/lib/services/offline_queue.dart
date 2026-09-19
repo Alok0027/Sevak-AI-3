@@ -3,17 +3,23 @@ import 'dart:math';
 
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
+import 'queue_cipher.dart';
 
 /// On-device mirror of the backend's `sync_queue` table (SRS section 6) --
 /// this is what makes FR-07.1 ("app shall function fully offline") and
 /// FR-01.3 (audio recorded offline syncs within 30s of connectivity) work.
 class OfflineQueue {
   static Database? _db;
+  static Future<Database>? _opening;
 
   Future<Database> get _database async {
     if (_db != null) return _db!;
+    return _opening ??= _open().whenComplete(() => _opening = null);
+  }
+
+  Future<Database> _open() async {
     final path = join(await getDatabasesPath(), 'sevakai_offline.db');
-    _db = await openDatabase(
+    final opened = await openDatabase(
       path,
       version: 1,
       onCreate: (db, version) => db.execute('''
@@ -28,7 +34,30 @@ class OfflineQueue {
         )
       '''),
     );
-    return _db!;
+    try {
+      await opened.execute('PRAGMA secure_delete = ON');
+      // Migrate one record at a time; never load the complete audio backlog.
+      final ids = await opened.query('sync_queue', columns: ['queue_id']);
+      var migrated = false;
+      for (final row in ids) {
+        final rows = await opened.query('sync_queue', where: 'queue_id = ?', whereArgs: [row['queue_id']]);
+        final value = rows.single['record_json'] as String;
+        if (!value.startsWith('enc1:')) {
+          migrated = true;
+          await opened.update('sync_queue', {'record_json': await QueueCipher.encrypt(value)},
+              where: 'queue_id = ?', whereArgs: [row['queue_id']]);
+        }
+      }
+      if (migrated) {
+        await opened.rawQuery('PRAGMA wal_checkpoint(TRUNCATE)');
+        await opened.execute('VACUUM');
+      }
+      _db = opened;
+      return opened;
+    } catch (_) {
+      await opened.close();
+      rethrow;
+    }
   }
 
   /// A patient id the phone can mint with no server and no signal.
@@ -68,10 +97,10 @@ class OfflineQueue {
   }) async {
     final db = await _database;
     await db.insert('sync_queue', {
-      'queue_id': DateTime.now().microsecondsSinceEpoch.toString(),
+      'queue_id': newLocalId(),
       'worker_id': workerId,
       'record_type': 'patient',
-      'record_json': jsonEncode({
+      'record_json': await QueueCipher.encrypt(jsonEncode({
         'record_type': 'patient',
         'patient_id': patientId,
         'name': name,
@@ -81,7 +110,7 @@ class OfflineQueue {
         'phone': phone,
         'pregnancy_stage': pregnancyStage,
         'rch_number': rchNumber,
-      }),
+      })),
       'created_at': DateTime.now().toIso8601String(),
       'retry_count': 0,
     });
@@ -90,41 +119,73 @@ class OfflineQueue {
   Future<void> enqueueVisit({
     required String workerId,
     required String patientId,
-    required String audioBase64,
+    String? audioBase64,
     required String languageCode,
+    String? confirmedTranscript,
+    Map<String, dynamic>? confirmedExtracted,
+    String? clientRequestId,
   }) async {
     final db = await _database;
-    final id = DateTime.now().microsecondsSinceEpoch.toString();
+    final id = clientRequestId ?? newLocalId();
     await db.insert('sync_queue', {
       'queue_id': id,
       'worker_id': workerId,
       'record_type': 'visit',
-      'record_json': jsonEncode({
+      'record_json': await QueueCipher.encrypt(jsonEncode({
         'record_type': 'visit',
         'patient_id': patientId,
         'audio_base64': audioBase64,
         'language_code': languageCode,
-      }),
+        'client_request_id': id,
+        if (confirmedTranscript != null) 'confirmed_transcript': confirmedTranscript,
+        if (confirmedExtracted != null) 'confirmed_extracted': confirmedExtracted,
+      })),
       'created_at': DateTime.now().toIso8601String(),
       'retry_count': 0,
-    });
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 
   Future<List<Map<String, dynamic>>> unsyncedRecords(String workerId) async {
     final db = await _database;
-    return db.query('sync_queue', where: 'worker_id = ? AND synced_at IS NULL', whereArgs: [workerId]);
+    final rows = await db.query('sync_queue', where: 'worker_id = ? AND synced_at IS NULL', whereArgs: [workerId]);
+    return _decryptRows(rows);
   }
 
   Future<int> pendingCount(String workerId) async {
-    final rows = await unsyncedRecords(workerId);
-    return rows.length;
+    final db = await _database;
+    return Sqflite.firstIntValue(await db.rawQuery(
+      'SELECT COUNT(*) FROM sync_queue WHERE worker_id = ? AND synced_at IS NULL',
+      [workerId],
+    )) ?? 0;
+  }
+
+  Future<List<String>> pendingIds(String workerId) async {
+    final db = await _database;
+    final rows = await db.query('sync_queue', columns: ['queue_id'],
+      where: 'worker_id = ? AND synced_at IS NULL', whereArgs: [workerId],
+      orderBy: "CASE WHEN record_type = 'patient' THEN 0 ELSE 1 END, created_at, queue_id");
+    return rows.map((row) => row['queue_id'] as String).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> recordsByIds(String workerId, List<String> ids) async {
+    if (ids.isEmpty) return [];
+    final db = await _database;
+    final rows = await db.query('sync_queue',
+      where: 'worker_id = ? AND synced_at IS NULL AND queue_id IN (${List.filled(ids.length, '?').join(',')})',
+      whereArgs: [workerId, ...ids]);
+    final byId = {for (final row in rows) row['queue_id']: row};
+    return _decryptRows([for (final id in ids) if (byId.containsKey(id)) byId[id]!]);
+  }
+
+  Future<List<Map<String, dynamic>>> _decryptRows(List<Map<String, dynamic>> rows) async {
+    return [for (final row in rows) {...row,
+      'record_json': await QueueCipher.decrypt(row['record_json'] as String)}];
   }
 
   Future<void> markSynced(String queueId) async {
     final db = await _database;
-    await db.update(
+    await db.delete(
       'sync_queue',
-      {'synced_at': DateTime.now().toIso8601String()},
       where: 'queue_id = ?',
       whereArgs: [queueId],
     );

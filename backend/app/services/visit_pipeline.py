@@ -3,10 +3,14 @@ persists Visit / RiskFlag / Action rows and refreshes the running monthly
 HMIS report -- everything POST /api/v1/visits/voice needs (NFR-P1: <30s
 end-to-end, table 17 data flow)."""
 import json
+import hashlib
 import logging
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+from fastapi import HTTPException
+from app.db.models.visit_request import VisitRequest
 
 from app.agents import agent4_reporting as agent4
 from app.agents.graph import build_pipeline_graph
@@ -35,6 +39,7 @@ async def run_voice_visit(
     language_code: str = "hi",
     confirmed_transcript: str | None = None,
     confirmed_extracted: ExtractedFields | None = None,
+    client_request_id: str | None = None,
 ) -> VoiceVisitResponse:
     """FR-01.4: pass `confirmed_transcript` to skip re-transcription and run
     the rest of the pipeline on exactly the text the ASHA already reviewed
@@ -46,6 +51,30 @@ async def run_voice_visit(
     patient = db.query(Patient).filter(Patient.patient_id == patient_id).first()
     if patient is None:
         raise ValueError(f"Unknown patient_id: {patient_id}")
+
+    receipt = None
+    if client_request_id:
+        request_key = hashlib.sha256(f"{worker_id}:{client_request_id}".encode()).hexdigest()
+        canonical = json.dumps({
+            "patient_id": patient_id, "language_code": language_code,
+            "audio": None if confirmed_transcript else audio_base64,
+            "transcript": confirmed_transcript,
+            "fields": confirmed_extracted.model_dump() if confirmed_extracted is not None else None,
+        }, sort_keys=True, separators=(",", ":"))
+        digest = hashlib.sha256(canonical.encode()).hexdigest()
+        receipt = VisitRequest(request_key=request_key, payload_hash=digest)
+        db.add(receipt)
+        try:
+            db.commit()  # Unique insert claims this operation across processes.
+        except IntegrityError:
+            db.rollback()
+            receipt = db.get(VisitRequest, request_key)
+            if receipt is None or receipt.payload_hash != digest:
+                raise HTTPException(409, "Request ID was already used for different visit data")
+            if receipt.response_json is None:
+                # Never blindly repeat a request whose external outcome is unknown.
+                raise HTTPException(409, "Visit is processing or requires recovery; keep the same request ID")
+            return VoiceVisitResponse.model_validate_json(receipt.response_json)
 
     bhashini_client = get_bhashini_client(settings)
     llm_client = get_llm_client(settings)
@@ -105,7 +134,14 @@ async def run_voice_visit(
             )
         )
 
-    db.commit()
+    response = VoiceVisitResponse(
+        visit_id=visit.visit_id, transcript=result["transcript"], extracted=extracted,
+        risk_level=risk_level, risk_score=risk_score, risk_drivers=risk_drivers,
+        actions_generated=actions,
+    )
+    if receipt is not None:
+        receipt.response_json = response.model_dump_json()
+    db.commit()  # Visit, actions, risk flag and replay response become durable together.
 
     # FR-06: run the 48-hour escalation check here rather than only when a
     # supervisor opens the dashboard. A patient who has been HIGH and
@@ -115,8 +151,7 @@ async def run_voice_visit(
     # wrapped so an unreachable supervisor cannot fail this ASHA's visit.
     try:
         escalated = check_and_escalate(db)
-        if escalated:
-            await deliver_escalation_alerts(db, whatsapp_client, sms_client)
+        # Delivery belongs to the independent outbox worker, never this request.
     except Exception:  # noqa: BLE001 -- escalation must never lose a visit
         logger.exception("escalation check failed after visit %s", visit.visit_id)
     db.refresh(visit)

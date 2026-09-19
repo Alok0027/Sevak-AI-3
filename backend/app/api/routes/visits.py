@@ -4,6 +4,13 @@ endpoint), and POST /api/v1/visits/{visit_id}/risk-override (FR-03.3)."""
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field, field_validator
+from app.api.deps import require_worker_access
+from app.db.models.risk_resolution import RiskResolution
+from app.db.models.notification import Notification
+from app.db.models.action import Action
+from app.db.models.audit_log import AuditLog
+from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import DbSession, get_supervisor_scope, require_roles
 from app.core.config import get_settings
@@ -29,6 +36,49 @@ from app.services.llm_client import get_llm_client
 from app.services.visit_pipeline import run_voice_visit
 
 router = APIRouter(prefix="/api/v1/visits", tags=["visits"])
+
+class ResolveRiskRequest(BaseModel):
+    note: str = Field(min_length=10, max_length=2000)
+
+    @field_validator("note")
+    @classmethod
+    def meaningful_note(cls, value):
+        if len(value.strip()) < 10:
+            raise ValueError("A resolution note of at least 10 characters is required")
+        return value.strip()
+
+@router.post("/{visit_id}/resolve-risk")
+def resolve_risk(visit_id: str, payload: ResolveRiskRequest, db: DbSession,
+                 user=Depends(require_roles("anm", "bmo"))):
+    visit = db.get(Visit, visit_id)
+    if visit is None:
+        raise HTTPException(404, "Visit not found")
+    require_worker_access(user, db, visit.worker_id)
+    existing = db.get(RiskResolution, visit_id)
+    if existing:
+        return {"status": "resolved", "resolved_by": existing.resolved_by}
+    flag = db.query(RiskFlag).filter(RiskFlag.visit_id == visit_id).first()
+    if flag is None:
+        raise HTTPException(404, "Risk flag not found")
+    now = datetime.now(timezone.utc)
+    db.add(RiskResolution(visit_id=visit_id, resolved_by=user.worker_id, note=payload.note, resolved_at=now))
+    flag.actioned_at = now
+    # Keep the historical risk classification. Resolution is a separate human decision.
+    for action in db.query(Action).filter(Action.visit_id == visit_id, Action.type == "escalation_alert").all():
+        notification = db.get(Notification, action.action_id)
+        if notification is not None and notification.status in ("queued", "retry"):
+            notification.status = "cancelled"
+            action.status = "cancelled"
+        elif notification is None and action.status in ("pending", "failed"):
+            action.status = "cancelled"
+    db.add(AuditLog(user_id=user.worker_id, action_type="risk.resolve", record_id=visit_id, record_type="visit"))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        if db.get(RiskResolution, visit_id) is None:
+            raise
+    return {"status": "resolved", "resolved_by": db.get(RiskResolution, visit_id).resolved_by}
 
 
 @router.post("/transcribe", response_model=TranscribeResponse)
@@ -106,6 +156,7 @@ async def record_voice_visit(
             language_code=payload.language_code,
             confirmed_transcript=payload.confirmed_transcript,
             confirmed_extracted=payload.confirmed_extracted,
+            client_request_id=payload.client_request_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -141,6 +192,8 @@ def override_risk(
     # BMO: district-wide, no scope restriction (get_supervisor_scope returns
     # None for bmo everywhere else in the app -- same rule here).
 
+    if db.get(RiskResolution, visit_id) is not None:
+        raise HTTPException(409, "This visit was resolved; record a new clinical assessment instead of rewriting it")
     if payload.new_risk_level == visit.risk_level:
         raise HTTPException(
             status_code=400,

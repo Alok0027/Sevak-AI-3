@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   fetchMetrics,
   fetchAnalytics,
@@ -48,16 +48,22 @@ export default function DashboardPage() {
   const [compliance, setCompliance] = useState(null);
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const activeRequest = useRef(null);
 
   const refresh = useCallback(async () => {
+    if (activeRequest.current) return;
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    const options = { signal: controller.signal };
     try {
       const [m, a, e, w, c] = await Promise.all([
-        fetchMetrics(),
-        fetchAnalytics(),
-        fetchEscalations(),
-        fetchWorkers(),
-        fetchFollowupCompliance(),
+        fetchMetrics(options),
+        fetchAnalytics(options),
+        fetchEscalations(options),
+        fetchWorkers(options),
+        fetchFollowupCompliance(options),
       ]);
+      if (controller.signal.aborted) return;
       setMetrics(m);
       setAnalytics(a);
       setEscalations(e);
@@ -66,14 +72,22 @@ export default function DashboardPage() {
       setLastUpdated(new Date());
       setError(null);
     } catch (err) {
+      if (controller.signal.aborted) return;
+      controller.abort(); // Cancel sibling requests after one fails.
       setError(err.response?.data?.detail || "Failed to load dashboard data");
+    } finally {
+      if (activeRequest.current === controller) activeRequest.current = null;
     }
   }, []);
 
   useEffect(() => {
     refresh();
     const interval = setInterval(refresh, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      activeRequest.current?.abort();
+      activeRequest.current = null;
+    };
   }, [refresh]);
 
   const overdue = compliance?.total_overdue ?? 0;

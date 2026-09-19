@@ -16,6 +16,7 @@ from app.api.routes import (
     tasks,
     visits,
     workers,
+    notifications,
 )
 from app.core.config import get_settings
 from app.db.session import SessionLocal, backfill_identity, init_db
@@ -95,3 +96,4 @@ app.include_router(tasks.router)
 app.include_router(workers.router)
 app.include_router(admin.router)
 app.include_router(support.router)
+app.include_router(notifications.router)

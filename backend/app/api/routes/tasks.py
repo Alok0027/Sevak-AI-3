@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.deps import DbSession, require_roles
+from app.api.deps import DbSession, require_roles, require_worker_access
 from app.db.models.action import Action
 from app.db.models.patient import Patient
 from app.db.models.visit import Visit
@@ -25,6 +25,7 @@ def list_tasks(
     db: DbSession,
     _user=Depends(require_roles("asha")),
 ) -> dict:
+    require_worker_access(_user, db, worker_id)
     rows = (
         db.query(Action, Visit, Patient)
         .join(Visit, Action.visit_id == Visit.visit_id)

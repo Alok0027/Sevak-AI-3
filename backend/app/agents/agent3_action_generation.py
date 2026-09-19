@@ -222,17 +222,10 @@ async def generate(
         return actions
 
     whatsapp_text = await _draft_whatsapp_message(llm_client, patient_name, risk_level, driver_text)
-    wa_result = await _attempt(
-        lambda: _deliver_whatsapp(
-            whatsapp_client, patient_phone or "", patient_name, risk_level, whatsapp_text, due_days
-        ),
-        "whatsapp",
-    )
     actions.append({
         "type": "whatsapp",
         "content": whatsapp_text,
-        "status": wa_result["status"],
-        **({"error": wa_result["error"]} if "error" in wa_result else {}),
+        "status": "draft",
     })
 
     # SMS fallback (SRS section 11 risk register): a real delivery channel
@@ -241,16 +234,8 @@ async def generate(
     # credentials are configured, so nothing is added (mirrors how the
     # referral letter is skipped for non-HIGH risk: silent no-op, not an
     # empty/placeholder action).
-    if not isinstance(sms_client, MockSmsClient):
-        sms_result = await _attempt(
-            lambda: sms_client.send_message(patient_phone or "", whatsapp_text), "sms"
-        )
-        actions.append({
-            "type": "sms",
-            "content": whatsapp_text,
-            "status": sms_result["status"],
-            **({"error": sms_result["error"]} if "error" in sms_result else {}),
-        })
+    # Sending is deliberately separate: one ASHA-approved channel per action,
+    # persisted in the outbox. Assessment never sends patient notifications.
 
     # FR-04.3: follow-up task.
     due_at = now + timedelta(days=due_days)

@@ -142,6 +142,7 @@ class _RootShellState extends State<RootShell> {
 
   @override
   void dispose() {
+    _syncService.dispose();
     _refresh.dispose();
     super.dispose();
   }
@@ -156,6 +157,7 @@ class _RootShellState extends State<RootShell> {
   /// tab to refetch, so she never has to record the same visit twice just
   /// because the list still says "no visits recorded yet".
   void _onDataChanged() {
+    if (!mounted) return;
     _refreshPending();
     _refresh.ping();
   }
@@ -203,7 +205,9 @@ class _RootShellState extends State<RootShell> {
       ),
     );
     if (confirmed != true) return;
+    await _syncService.dispose();
     await Session.clear();
+    widget.api.clearToken();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => LoginScreen(api: widget.api)),

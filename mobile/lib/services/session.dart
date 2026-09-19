@@ -1,4 +1,6 @@
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// A logged-in ASHA worker's identity, persisted to disk so the app can
 /// skip the login screen on relaunch -- a field worker doing a dozen home
@@ -20,17 +22,28 @@ class Session {
   static const _kWorkerId = 'worker_id';
   static const _kRole = 'role';
   static const _kWorkerName = 'worker_name';
+  static const _secure = FlutterSecureStorage();
+  static const _sessionKey = 'sevakai_session_v1';
 
   static Future<void> save(Session session) async {
+    await _secure.write(key: _sessionKey, value: jsonEncode({
+      'token': session.token, 'workerId': session.workerId,
+      'role': session.role, 'workerName': session.workerName,
+    }));
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kToken, session.token);
-    await prefs.setString(_kWorkerId, session.workerId);
-    await prefs.setString(_kRole, session.role);
-    await prefs.setString(_kWorkerName, session.workerName);
+    for (final key in [_kToken, _kWorkerId, _kRole, _kWorkerName]) {
+      await prefs.remove(key);
+    }
   }
 
   /// Returns null if there is no saved session (or it's incomplete).
   static Future<Session?> restore() async {
+    final secured = await _secure.read(key: _sessionKey);
+    if (secured != null) {
+      final data = jsonDecode(secured) as Map<String, dynamic>;
+      return Session(token: data['token'], workerId: data['workerId'],
+          role: data['role'], workerName: data['workerName']);
+    }
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString(_kToken);
     final workerId = prefs.getString(_kWorkerId);
@@ -39,10 +52,13 @@ class Session {
     if (token == null || workerId == null || role == null || workerName == null) {
       return null;
     }
-    return Session(token: token, workerId: workerId, role: role, workerName: workerName);
+    final session = Session(token: token, workerId: workerId, role: role, workerName: workerName);
+    await save(session); // Remove plaintext only after secure storage succeeds.
+    return session;
   }
 
   static Future<void> clear() async {
+    await _secure.delete(key: _sessionKey);
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_kToken);
     await prefs.remove(_kWorkerId);

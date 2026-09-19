@@ -153,8 +153,8 @@ because it needs people, not code.
 **Status: instrument built, real-provider run outstanding.**
 
 `backend/scripts/measure_latency.py` times each pipeline stage over N
-runs and reports p50/p95/min/max. It builds its own scratch database, so
-it reproduces on a clean checkout.
+runs and reports p50/p95/min/max. It times the agent graph directly
+(no database involved -- the graph reads its state dict and writes nothing).
 
 It **refuses to issue a pass/fail verdict when any provider is mocked**,
 and prints `NOT A VALID MEASUREMENT` instead. An earlier version happily

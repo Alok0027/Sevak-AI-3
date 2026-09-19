@@ -39,6 +39,7 @@ class VoiceRecordScreen extends StatefulWidget {
 class _VoiceRecordScreenState extends State<VoiceRecordScreen> {
   final _recorder = AudioRecorder();
   final _queue = OfflineQueue();
+  String _clientRequestId = OfflineQueue.newLocalId();
   final _transcriptController = TextEditingController();
 
   bool _isRecording = false;
@@ -49,7 +50,6 @@ class _VoiceRecordScreenState extends State<VoiceRecordScreen> {
   bool _isReviewingFields = false;
   String? _speechLanguage; // null = follow the app's UI language
   String? _recordedPath;
-  String? _pendingAudioBase64; // kept around for the offline-fallback path
   Map<String, dynamic>? _result;
   String? _statusMessage;
 
@@ -104,6 +104,7 @@ class _VoiceRecordScreenState extends State<VoiceRecordScreen> {
     try {
       if (_isRecording) {
         final path = await _recorder.stop();
+        if (!mounted) return;
         setState(() {
           _isRecording = false;
           _recordedPath = path;
@@ -111,11 +112,13 @@ class _VoiceRecordScreenState extends State<VoiceRecordScreen> {
         return;
       }
       final hasPermission = await _recorder.hasPermission();
+      if (!mounted) return;
       if (!hasPermission) {
         _showError(micMessage);
         return;
       }
       final dir = await getTemporaryDirectory();
+      if (!mounted) return;
       final path = '${dir.path}/visit_${DateTime.now().millisecondsSinceEpoch}.m4a';
       // Compressed AAC on purpose: an ASHA uploads these over a rural mobile
       // connection, and the same clip is roughly 10x smaller than raw WAV.
@@ -124,6 +127,7 @@ class _VoiceRecordScreenState extends State<VoiceRecordScreen> {
       // AudioEncoder.wav here doesn't help anyway -- Android falls back to
       // the platform recorder and returns AAC in an MP4 container regardless.
       await _recorder.start(const RecordConfig(), path: path);
+      if (!mounted) return;
       setState(() {
         _isRecording = true;
         _isReviewing = false;
@@ -135,6 +139,7 @@ class _VoiceRecordScreenState extends State<VoiceRecordScreen> {
       // Never let a mic failure look like an unresponsive button -- always
       // surface exactly what went wrong (permission plugin error, no mic
       // hardware, browser blocking access, etc).
+      if (!mounted) return;
       setState(() => _isRecording = false);
       _showError('$startFailed: $e');
     }
@@ -154,11 +159,11 @@ class _VoiceRecordScreenState extends State<VoiceRecordScreen> {
       _statusMessage = null;
     });
 
-    final bytes = await File(_recordedPath!).readAsBytes();
-    final audioBase64 = base64Encode(bytes);
-    _pendingAudioBase64 = audioBase64;
-
+    String? audioBase64;
     try {
+      final bytes = await File(_recordedPath!).readAsBytes();
+      audioBase64 = base64Encode(bytes);
+      if (!mounted) return;
       final connectivity = await Connectivity().checkConnectivity();
       final online = !connectivity.contains(ConnectivityResult.none);
       if (!online) {
@@ -169,13 +174,15 @@ class _VoiceRecordScreenState extends State<VoiceRecordScreen> {
           patientId: widget.patient.id,
           audioBase64: audioBase64,
           languageCode: language,
+          clientRequestId: _clientRequestId,
         );
-        setState(() => _statusMessage = offlineMessage);
+        if (mounted) setState(() => _statusMessage = offlineMessage);
         return;
       }
 
       final transcript =
           await widget.api.transcribeAudio(audioBase64: audioBase64, languageCode: language);
+      if (!mounted) return;
       setState(() {
         _transcriptController.text = transcript;
         _isReviewing = true;
@@ -183,13 +190,18 @@ class _VoiceRecordScreenState extends State<VoiceRecordScreen> {
     } catch (e) {
       // Couldn't even reach the server to transcribe -- fall back to the
       // offline queue rather than losing the visit (FR-07.1).
+      if (audioBase64 == null) {
+        _showError('$unreachableMessage ($e)');
+        return;
+      }
       await _queue.enqueueVisit(
         workerId: widget.workerId,
         patientId: widget.patient.id,
         audioBase64: audioBase64,
         languageCode: language,
+        clientRequestId: _clientRequestId,
       );
-      setState(() => _statusMessage = '$unreachableMessage ($e)');
+      if (mounted) setState(() => _statusMessage = '$unreachableMessage ($e)');
     } finally {
       if (mounted) setState(() => _isTranscribing = false);
     }
@@ -212,6 +224,7 @@ class _VoiceRecordScreenState extends State<VoiceRecordScreen> {
     });
     try {
       final extracted = await widget.api.extractFields(transcript: edited);
+      if (!mounted) return;
       setState(() {
         _extracted = extracted;
         _bpSystolicController.text = extracted['bp_systolic']?.toString() ?? '';
@@ -236,6 +249,7 @@ class _VoiceRecordScreenState extends State<VoiceRecordScreen> {
   /// never a fresh re-transcription or re-extraction, which could differ
   /// from what she approved.
   Future<void> _confirmAndSubmit() async {
+    if (_isSubmitting) return;
     final edited = _transcriptController.text.trim();
     if (edited.isEmpty) {
       _showError(tr(context, 'transcriptEmpty'));
@@ -248,6 +262,7 @@ class _VoiceRecordScreenState extends State<VoiceRecordScreen> {
       _isSubmitting = true;
       _statusMessage = null;
     });
+    var savedLocally = false;
     try {
       final pregnancy = _pregnancyController.text.trim();
       final confirmed = Map<String, dynamic>.from(_extracted)
@@ -260,31 +275,32 @@ class _VoiceRecordScreenState extends State<VoiceRecordScreen> {
         ..['blood_sugar_random'] = int.tryParse(_sugarRandomController.text.trim())
         ..['medication_compliance'] = _medicationCompliance;
 
+      // Save the reviewed values before making any network request. A lost
+      // response or process restart replays this same operation and data.
+      await _queue.enqueueVisit(workerId: widget.workerId,
+          patientId: widget.patient.id, languageCode: language,
+          confirmedTranscript: edited, confirmedExtracted: confirmed,
+          clientRequestId: _clientRequestId);
+      savedLocally = true;
+
       final result = await widget.api.submitVoiceVisit(
         workerId: widget.workerId,
         patientId: widget.patient.id,
         languageCode: language,
         confirmedTranscript: edited,
         confirmedExtracted: confirmed,
+        clientRequestId: _clientRequestId,
       );
+      await _queue.markSynced(_clientRequestId);
+      if (!mounted) return;
       setState(() {
         _result = result;
         _isReviewing = false;
         _isReviewingFields = false;
       });
     } catch (e) {
-      // Network dropped between review and confirm -- fall back to queuing
-      // the original audio so the visit isn't lost. Note this does mean
-      // her edits don't carry through to the eventual sync (it'll be
-      // freshly re-transcribed then); a rare edge case worth accepting
-      // rather than losing the visit entirely.
-      if (_pendingAudioBase64 != null) {
-        await _queue.enqueueVisit(
-          workerId: widget.workerId,
-          patientId: widget.patient.id,
-          audioBase64: _pendingAudioBase64!,
-          languageCode: language,
-        );
+      if (savedLocally) {
+        if (!mounted) return;
         setState(() {
           _statusMessage = '$unreachableMessage ($e)';
           _isReviewing = false;
@@ -299,11 +315,11 @@ class _VoiceRecordScreenState extends State<VoiceRecordScreen> {
   }
 
   void _reRecord() {
+    _clientRequestId = OfflineQueue.newLocalId();
     setState(() {
       _isReviewing = false;
       _isReviewingFields = false;
       _recordedPath = null;
-      _pendingAudioBase64 = null;
       _transcriptController.clear();
       _extracted = {};
     });

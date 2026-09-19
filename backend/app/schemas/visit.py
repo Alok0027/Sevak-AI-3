@@ -28,6 +28,7 @@ class VoiceVisitRequest(BaseModel):
 
     worker_id: str
     patient_id: str
+    client_request_id: str | None = Field(default=None, min_length=1, max_length=100)
     audio_base64: str | None = Field(default=None, description="Base64-encoded WAV/MP3/M4A clip, ~60s")
     language_code: str = Field(default="hi", description="e.g. hi, mr, ta, te, bn")
     confirmed_transcript: str | None = Field(

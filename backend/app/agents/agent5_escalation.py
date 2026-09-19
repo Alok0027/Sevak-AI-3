@@ -59,12 +59,18 @@ def check_and_escalate(db: Session) -> list[str]:
     )
     escalated = []
     for flag in candidates:
-        flag.escalated_at = datetime.now(timezone.utc)
-        escalated.append(flag.flag_id)
+        claimed = db.query(RiskFlag).filter(RiskFlag.flag_id == flag.flag_id,
+            RiskFlag.actioned_at.is_(None), RiskFlag.escalated_at.is_(None)).update(
+                {RiskFlag.escalated_at: datetime.now(timezone.utc)}, synchronize_session="fetch")
+        if not claimed:
+            continue
         alert = _build_alert(db, flag)
         if alert is not None:
+            escalated.append(flag.flag_id)
             db.add(alert)
-    if escalated:
+        else:
+            flag.escalated_at = None  # Retry recipient lookup after staffing is corrected.
+    if candidates:
         db.commit()
     return escalated
 
@@ -86,12 +92,12 @@ def _supervisor_for(db: Session, flag: RiskFlag) -> Worker | None:
     if asha.sub_centre_id:
         anm = (
             db.query(Worker)
-            .filter(Worker.role == "anm", Worker.sub_centre_id == asha.sub_centre_id)
+            .filter(Worker.role == "anm", Worker.sub_centre_id == asha.sub_centre_id, Worker.status == "active")
             .first()
         )
         if anm is not None:
             return anm
-    return db.query(Worker).filter(Worker.role == "bmo").first()
+    return db.query(Worker).filter(Worker.role == "bmo", Worker.status == "active").first()
 
 
 def _build_alert(db: Session, flag: RiskFlag) -> Action | None:

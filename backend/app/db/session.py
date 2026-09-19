@@ -74,6 +74,9 @@ def init_db() -> None:
         support_ticket,
         sync_queue,
         visit,
+        visit_request,
+        notification,
+        risk_resolution,
         worker,
     )
 

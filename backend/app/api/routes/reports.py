@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
 
 from app.agents import agent4_reporting as agent4
-from app.api.deps import DbSession, require_roles
+from app.api.deps import DbSession, require_roles, require_worker_access
 from app.services.pdf_generator import generate_hmis_pdf
 
 router = APIRouter(prefix="/api/v1/reports", tags=["reports"])
@@ -20,6 +20,7 @@ def get_hmis_report(
     db: DbSession,
     _user=Depends(require_roles("asha", "anm", "bmo", "admin")),
 ) -> dict:
+    require_worker_access(_user, db, worker_id)
     report = agent4.regenerate_monthly_report(db, worker_id=worker_id, month=month, year=year)
     data = json.loads(report.data_json)
 
@@ -27,7 +28,7 @@ def get_hmis_report(
     report.pdf_url = f"/api/v1/reports/hmis/{worker_id}/{month}/{year}/pdf"
     db.commit()
 
-    return {"report_data_json": data, "pdf_url": report.pdf_url, "_pdf_local_path": os.path.abspath(pdf_path)}
+    return {"report_data_json": data, "pdf_url": report.pdf_url}
 
 
 @router.get("/hmis/{worker_id}/{month}/{year}/pdf")
@@ -38,6 +39,7 @@ def download_hmis_pdf(
     db: DbSession,
     _user=Depends(require_roles("asha", "anm", "bmo", "admin")),
 ):
+    require_worker_access(_user, db, worker_id)
     report = agent4.regenerate_monthly_report(db, worker_id=worker_id, month=month, year=year)
     data = json.loads(report.data_json)
     pdf_path = generate_hmis_pdf(worker_id=worker_id, month=month, year=year, data=data)

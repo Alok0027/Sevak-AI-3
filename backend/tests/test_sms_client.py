@@ -58,7 +58,7 @@ def test_generate_adds_no_sms_action_on_mock_sms_client():
     assert not any(a["type"] == "sms" for a in actions)
 
 
-def test_generate_adds_sms_action_and_sends_it_on_real_sms_client():
+def test_generate_drafts_without_sending_even_with_real_sms_client():
     fake_sms = _FakeSmsClient()
     actions = asyncio.run(agent3.generate(
         extracted=_extracted(), risk_level="HIGH", risk_drivers=[],
@@ -67,10 +67,9 @@ def test_generate_adds_sms_action_and_sends_it_on_real_sms_client():
         sms_client=fake_sms,
     ))
     sms_actions = [a for a in actions if a["type"] == "sms"]
-    assert len(sms_actions) == 1
-    assert sms_actions[0]["status"] == "queued"
-    assert len(fake_sms.sent) == 1
-    assert fake_sms.sent[0][0] == "9876543210"  # normalization happens inside the real client, not here
+    assert sms_actions == []
+    assert fake_sms.sent == []
+    assert next(a for a in actions if a["type"] == "whatsapp")["status"] == "draft"
 
 
 def test_twilio_error_surfaces_the_code_and_reason(monkeypatch):
@@ -381,19 +380,13 @@ def test_agent3_sends_the_template_not_the_llm_text_on_the_meta_path():
         )
     )
 
-    # The template carried it, and the free-form path was never touched.
-    assert sent["template"] == "followup_reminder"
-    assert "free_form" not in sent
-    # Name, risk in her language, and when -- HIGH is a 48-hour follow-up.
-    assert sent["params"][0] == "Meera Patil"
-    assert sent["params"][1] == "उच्च जोखिम"
-    assert sent["params"][2] == "दो दिन के अंदर"
-    assert sent["language"] == "hi"
+    # Delivery is now gated by explicit approval and covered by outbox tests.
+    assert sent == {}
 
     # The record still holds the full drafted message, not the template.
     whatsapp_action = next(a for a in actions if a["type"] == "whatsapp")
     assert "Meera Patil" in whatsapp_action["content"]
-    assert whatsapp_action["status"] == "sent"
+    assert whatsapp_action["status"] == "draft"
 
 
 def test_agent3_falls_back_to_free_form_where_templates_do_not_exist():
@@ -427,7 +420,7 @@ def test_agent3_falls_back_to_free_form_where_templates_do_not_exist():
             sms_client=MockSmsClient(),
         )
     )
-    assert client.seen is not None and "Asha Devi" in client.seen
+    assert client.seen is None  # No provider bypasses ASHA approval.
 
     # And the mock provider still reports mock_sent, so nothing that relied
     # on the old behaviour changed meaning.
@@ -443,7 +436,7 @@ def test_agent3_falls_back_to_free_form_where_templates_do_not_exist():
             sms_client=MockSmsClient(),
         )
     )
-    assert next(a for a in actions if a["type"] == "whatsapp")["status"] == "mock_sent"
+    assert next(a for a in actions if a["type"] == "whatsapp")["status"] == "draft"
 
 
 def test_a_failed_send_does_not_lose_the_visit():
@@ -485,8 +478,8 @@ def test_a_failed_send_does_not_lose_the_visit():
 
     # And the failure is recorded rather than hidden.
     wa = next(a for a in actions if a["type"] == "whatsapp")
-    assert wa["status"] == "failed"
-    assert "190" in wa["error"]
+    assert wa["status"] == "draft"
+    assert "error" not in wa  # Assessment did not attempt delivery.
 
 
 def test_a_failed_sms_is_also_recorded_not_raised():
@@ -512,7 +505,6 @@ def test_a_failed_sms_is_also_recorded_not_raised():
             sms_client=BrokenSms(),
         )
     )
-    sms = next(a for a in actions if a["type"] == "sms")
-    assert sms["status"] == "failed"
-    assert "21608" in sms["error"]
+    assert not any(a["type"] == "sms" for a in actions)
+    assert next(a for a in actions if a["type"] == "whatsapp")["status"] == "draft"
     assert any(a["type"] == "followup" for a in actions)

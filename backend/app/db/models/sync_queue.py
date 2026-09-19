@@ -5,6 +5,7 @@ from sqlalchemy import String, Integer, DateTime, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
+from app.core.encryption import EncryptedString
 
 
 def _uuid() -> str:
@@ -20,7 +21,7 @@ class SyncQueueEntry(Base):
     queue_id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     worker_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     record_type: Mapped[str] = mapped_column(String, nullable=False)  # e.g. "visit"
-    record_json: Mapped[str] = mapped_column(Text, nullable=False)
+    record_json: Mapped[str] = mapped_column(EncryptedString, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     synced_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)

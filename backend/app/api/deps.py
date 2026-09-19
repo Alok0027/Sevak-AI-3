@@ -19,12 +19,20 @@ class CurrentUser:
 
 def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer_scheme)],
+    db: Annotated[Session, Depends(get_db)],
 ) -> CurrentUser:
     try:
         payload = decode_access_token(credentials.credentials)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
-    return CurrentUser(worker_id=payload["sub"], role=payload["role"])
+    from app.db.models.worker import Worker
+
+    worker = db.get(Worker, payload.get("sub")) if payload.get("sub") else None
+    if worker is None or worker.status != "active":
+        raise HTTPException(status_code=401, detail="Account is not active")
+    # A signed token identifies a session; current database permissions
+    # remain authoritative after suspension or a role change.
+    return CurrentUser(worker_id=worker.worker_id, role=worker.role)
 
 
 def require_roles(*allowed_roles: str):
@@ -56,6 +64,21 @@ def get_supervisor_scope(user: CurrentUser, db: Session) -> str | None:
     from app.db.models.worker import Worker  # local import: avoid circular import at module load
 
     worker = db.query(Worker).filter(Worker.worker_id == user.worker_id).first()
-    if worker is None:
-        raise HTTPException(status_code=500, detail="ANM worker record not found -- cannot scope request")
+    if worker is None or not worker.sub_centre_id or not worker.sub_centre_id.strip():
+        raise HTTPException(status_code=403, detail="ANM has no assigned sub-centre")
     return worker.sub_centre_id
+
+
+def require_worker_access(user: CurrentUser, db: Session, worker_id: str) -> None:
+    """Guard worker-addressed reads without changing existing role policy."""
+    if user.role == "asha":
+        if worker_id != user.worker_id:
+            raise HTTPException(status_code=403, detail="Not your worker record")
+        return
+    scope = get_supervisor_scope(user, db)
+    if scope is not None:
+        from app.db.models.worker import Worker
+
+        worker = db.get(Worker, worker_id)
+        if worker is None or worker.sub_centre_id != scope:
+            raise HTTPException(status_code=403, detail="Worker is outside your sub-centre")

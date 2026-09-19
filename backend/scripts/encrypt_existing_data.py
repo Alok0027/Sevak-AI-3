@@ -19,17 +19,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.core.encryption import _MARKER, encrypt_field  # noqa: E402
 from app.db.session import engine  # noqa: E402
+from sqlalchemy import text
 
 
 def _encrypt_column(conn, table: str, pk: str, column: str) -> int:
-    rows = conn.exec_driver_sql(f"SELECT {pk}, {column} FROM {table}").fetchall()
+    rows = conn.execute(text(f"SELECT {pk}, {column} FROM {table}"))
     updated = 0
     for row_id, value in rows:
         if value is None or value.startswith(_MARKER):
             continue
-        conn.exec_driver_sql(
-            f"UPDATE {table} SET {column} = ? WHERE {pk} = ?",
-            (encrypt_field(value), row_id),
+        conn.execute(
+            text(f"UPDATE {table} SET {column} = :value WHERE {pk} = :row_id"),
+            {"value": encrypt_field(value), "row_id": row_id},
         )
         updated += 1
     return updated
@@ -41,10 +42,11 @@ def main() -> None:
         n_phones = _encrypt_column(conn, "patients", "patient_id", "phone")
         n_transcripts = _encrypt_column(conn, "visits", "visit_id", "transcript")
         n_structured = _encrypt_column(conn, "visits", "visit_id", "structured_json")
+        n_queue = _encrypt_column(conn, "sync_queue", "queue_id", "record_json")
         conn.commit()
     print(
         f"Encrypted {n_names} patient names, {n_phones} patient phone numbers, "
-        f"{n_transcripts} visit transcripts, {n_structured} structured visit records."
+        f"{n_transcripts} visit transcripts, {n_structured} structured visit records, {n_queue} queued payloads."
     )
 
 

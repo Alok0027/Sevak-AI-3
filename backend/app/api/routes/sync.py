@@ -20,7 +20,7 @@ signal, the visit references it immediately, and sync reconciles both."""
 import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import DbSession, require_roles
 from app.core.config import get_settings
@@ -28,7 +28,8 @@ from app.db.models.patient import Patient
 from app.db.models.sync_queue import SyncQueueEntry
 from app.db.models.worker import Worker
 from app.schemas.sync import SyncBatchRequest, SyncBatchResponse
-from app.services import identity
+from app.schemas.visit import VoiceVisitRequest
+from app.services import identity, cover
 from app.services.visit_pipeline import run_voice_visit
 
 router = APIRouter(prefix="/api/v1/sync", tags=["sync"])
@@ -40,17 +41,20 @@ async def sync_batch(
     db: DbSession,
     _user=Depends(require_roles("asha")),
 ) -> SyncBatchResponse:
+    if payload.worker_id != _user.worker_id:
+        raise HTTPException(status_code=403, detail="Not your worker record")
     settings = get_settings()
     synced = 0
     errors: list[str] = []
 
     # Patients first -- see the module docstring.
+    results = []
     ordered = sorted(
-        payload.records,
-        key=lambda r: 0 if r.get("record_type") == "patient" else 1,
+        enumerate(payload.records),
+        key=lambda pair: 0 if pair[1].get("record_type") == "patient" else 1,
     )
 
-    for record in ordered:
+    for index, record in ordered:
         record_type = record.get("record_type", "visit")
         entry = SyncQueueEntry(
             worker_id=payload.worker_id,
@@ -64,24 +68,36 @@ async def sync_batch(
         try:
             if record_type == "patient":
                 _apply_patient(db, payload.worker_id, record)
-            elif record_type == "visit" and record.get("audio_base64"):
+            elif record_type == "visit":
+                visit_input = VoiceVisitRequest.model_validate({**record, "worker_id": payload.worker_id})
+                patient = db.get(Patient, record.get("patient_id"))
+                if patient is None or patient.worker_id not in cover.visible_worker_ids(db, _user.worker_id):
+                    raise ValueError("Patient is not available to this worker")
                 await run_voice_visit(
                     db=db,
                     settings=settings,
                     worker_id=payload.worker_id,
                     patient_id=record["patient_id"],
-                    audio_base64=record["audio_base64"],
+                    audio_base64=visit_input.audio_base64,
                     language_code=record.get("language_code", "hi"),
+                    confirmed_transcript=visit_input.confirmed_transcript,
+                    confirmed_extracted=visit_input.confirmed_extracted,
+                    client_request_id=visit_input.client_request_id,
                 )
+            else:
+                raise ValueError("Unsupported record type or missing visit audio")
             entry.synced_at = datetime.now(timezone.utc)
             db.commit()
             synced += 1
+            results.append({"index": index, "status": "synced"})
         except Exception as exc:  # noqa: BLE001 -- report and continue, don't fail the whole batch
+            db.rollback()
             entry.retry_count += 1
             db.commit()
-            errors.append(f"{record_type} for patient {record.get('patient_id')}: {exc}")
+            errors.append(f"Record {index} could not be synced")
+            results.append({"index": index, "status": "failed"})
 
-    return SyncBatchResponse(synced=synced, failed=len(errors), errors=errors)
+    return SyncBatchResponse(synced=synced, failed=len(errors), errors=errors, results=results)
 
 
 def _apply_patient(db, worker_id: str, record: dict) -> None:
@@ -101,6 +117,8 @@ def _apply_patient(db, worker_id: str, record: dict) -> None:
     if patient_id:
         existing = db.query(Patient).filter(Patient.patient_id == patient_id).first()
         if existing is not None:
+            if existing.worker_id != worker_id:
+                raise ValueError("Patient ID is not owned by this worker")
             return
 
     name = (record.get("name") or "").strip()

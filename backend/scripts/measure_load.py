@@ -18,6 +18,13 @@ system is worse than none:
 On a free Render instance the first request after idle pays a cold start
 of roughly a minute. That is a real property of the deployment and the
 script measures it separately rather than letting it poison the sample.
+
+Why not just `ab -n 200 -c 50 <url>`, which ships with macOS? ab gives
+percentiles and a failure count, and for most services that would be
+enough to not write this. It does not separate the first request, and on
+a free-tier instance that one request takes ~50s -- enough to drag the
+mean of 200 requests up by 250ms and make a healthy service look slow.
+Getting that wrong in the other direction is what this file buys.
 """
 from __future__ import annotations
 
