@@ -8,7 +8,7 @@ to check any number here without asking us a question.
 no evidence is listed as such rather than left out, because the gap
 itself is the honest answer to "does this actually work".
 
-Last updated: 16 September 2026
+Last updated: 19 September 2026
 
 ---
 
@@ -90,9 +90,9 @@ own judgement on the assumption:
 > SevakAI removes the post-visit write-up from an ASHA's day. NHM records
 > ~10 lakh ASHAs nationally. **If** documentation costs each worker 30
 > minutes a day — an assumption, not a measurement — and SevakAI removes
-> two-thirds of it, that is 20 minutes per worker per day, or roughly
-> **1.2 crore hours a year returned to home visits** across the
-> workforce.
+> two-thirds of it, that is 20 minutes per worker per day. Across 10 lakh
+> workers and 365 days, that is 10,00,000 × 20 ÷ 60 × 365 ≈ **12.17 crore
+> hours a year returned to home visits** across the workforce.
 
 This is honest: one clearly-labelled assumption, arithmetic anyone can
 redo, and no claim about lives saved. It is also stronger in a viva,
@@ -288,7 +288,7 @@ Verified after the fix, in both languages:
 "khoon aa raha hai since morning"                      →  HIGH
 ```
 
-Full suite: **319 passed**, no regressions.
+Full suite: **341 passed**, no regressions (as of this update -- count moves as tests are added; re-run `pytest -q` for the current figure before quoting it).
 
 **This is the honest version of "our tests pass".** A suite that only ever
 goes green tells you what the author thought of. This eval was written

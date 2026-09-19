@@ -300,3 +300,113 @@ def test_admin_cannot_override_risk():
             json={"new_risk_level": "LOW", "reason": "Admin trying to override directly."},
         )
         assert resp.status_code == 403
+
+
+def test_override_cascade_moves_followup_deadline_and_withdraws_stale_escalation():
+    """Section 5 of the reliability review: a risk override has to touch more
+    than the label. Downgrading a HIGH visit with an alert already in flight
+    withdraws that alert, and either direction moves the follow-up deadline
+    to match the new tier (still anchored to the visit, not to now)."""
+    from datetime import timedelta
+
+    from app.db.models.action import Action
+    from app.db.models.notification import Notification
+    from app.db.models.visit import Visit
+
+    with TestClient(app) as client:
+        _seed()
+        asha = _login(client, "9999999999", "1234")
+        headers = {"Authorization": f"Bearer {asha['access_token']}"}
+        patients = client.get(f"/api/v1/patients/{asha['worker_id']}", headers=headers)
+        meera = next(p for p in patients.json()["patients"] if p["name"] == "Meera Patil")
+        visit = _record_demo_visit(client, headers, asha["worker_id"], meera["id"])
+        assert visit["risk_level"] == "HIGH"
+
+        db = SessionLocal()
+        try:
+            # Simulate the state check_and_escalate would have produced after
+            # 48h unactioned: an alert already queued for delivery.
+            alert = Action(
+                visit_id=visit["visit_id"], type="escalation_alert",
+                content="ALERT: HIGH risk case overdue", status="pending",
+            )
+            db.add(alert)
+            db.flush()
+            db.add(Notification(action_id=alert.action_id, payload_json="{}",
+                                 approved_by="system:escalation", status="queued"))
+            db.commit()
+            alert_id = alert.action_id
+
+            followup_before = (
+                db.query(Action)
+                .filter(Action.visit_id == visit["visit_id"], Action.type == "followup")
+                .first()
+            )
+            db_visit = db.get(Visit, visit["visit_id"])
+            assert abs((followup_before.due_at - (db_visit.created_at + timedelta(days=2))).total_seconds()) < 1
+        finally:
+            db.close()
+
+        resp = client.post(
+            f"/api/v1/visits/{visit['visit_id']}/risk-override",
+            headers=headers,
+            json={"new_risk_level": "LOW", "reason": "Rechecked myself, BP was normal on a second cuff."},
+        )
+        assert resp.status_code == 200, resp.text
+
+        db = SessionLocal()
+        try:
+            followup_after = (
+                db.query(Action)
+                .filter(Action.visit_id == visit["visit_id"], Action.type == "followup")
+                .first()
+            )
+            db_visit = db.get(Visit, visit["visit_id"])
+            assert abs((followup_after.due_at - (db_visit.created_at + timedelta(days=30))).total_seconds()) < 1
+
+            assert db.get(Action, alert_id).status == "cancelled"
+            assert db.get(Notification, alert_id).status == "cancelled"
+        finally:
+            db.close()
+
+
+def test_override_to_high_drafts_a_referral_if_none_exists():
+    """FR-04.1: every HIGH visit gets a referral letter. Downgrading and then
+    upgrading back to HIGH must not leave the visit with only a cancelled
+    referral and no active one for the ASHA to send."""
+    from app.db.models.action import Action
+
+    with TestClient(app) as client:
+        _seed()
+        asha = _login(client, "9999999999", "1234")
+        headers = {"Authorization": f"Bearer {asha['access_token']}"}
+        patients = client.get(f"/api/v1/patients/{asha['worker_id']}", headers=headers)
+        meera = next(p for p in patients.json()["patients"] if p["name"] == "Meera Patil")
+        visit = _record_demo_visit(client, headers, asha["worker_id"], meera["id"])
+        assert visit["risk_level"] == "HIGH"
+
+        client.post(
+            f"/api/v1/visits/{visit['visit_id']}/risk-override",
+            headers=headers,
+            json={"new_risk_level": "LOW", "reason": "Faulty cuff reading, retested normal at the time."},
+        )
+
+        resp = client.post(
+            f"/api/v1/visits/{visit['visit_id']}/risk-override",
+            headers=headers,
+            json={"new_risk_level": "HIGH", "reason": "New information: she is now reporting severe headache."},
+        )
+        assert resp.status_code == 200, resp.text
+
+        db = SessionLocal()
+        try:
+            referrals = (
+                db.query(Action)
+                .filter(Action.visit_id == visit["visit_id"], Action.type == "referral")
+                .all()
+            )
+            active = [r for r in referrals if r.status != "cancelled"]
+            assert len(active) == 1, [(r.status, r.content[:40]) for r in referrals]
+            assert "severe headache" in active[0].content
+        finally:
+            db.close()
