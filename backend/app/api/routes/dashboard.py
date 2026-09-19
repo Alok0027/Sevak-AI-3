@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Query as SAQuery, Session
 
-from app.api.deps import DbSession, get_supervisor_scope, require_roles
+from app.api.deps import DbSession, require_roles, visible_sub_centres
 from app.db.models.action import Action
 from app.db.models.patient import Patient
 from app.db.models.visit import Visit
@@ -46,12 +46,13 @@ def _due_sort(due_at: datetime | None) -> datetime:
     return due_at if due_at.tzinfo else due_at.replace(tzinfo=timezone.utc)
 
 
-def _scoped_visits(db: Session, scope: str | None) -> SAQuery:
-    """Base Visit query, joined to Worker and filtered to `scope`'s
-    sub_centre_id when set (ANM), or unfiltered (BMO/Admin)."""
+def _scoped_visits(db: Session, scope: list[str] | None) -> SAQuery:
+    """Base Visit query, joined to Worker and filtered to the sub-centres
+    the caller may see (one for an ANM, her district's for a BMO, all for
+    an Admin -- see deps.visible_sub_centres)."""
     q = db.query(Visit).join(Worker, Visit.worker_id == Worker.worker_id)
-    if scope:
-        q = q.filter(Worker.sub_centre_id == scope)
+    if scope is not None:
+        q = q.filter(Worker.sub_centre_id.in_(scope))
     return q
 
 
@@ -78,7 +79,11 @@ def heatmap(
     path if a state-wide deployment ever needs it is a GROUP BY with a
     window function for the per-patient latest visit.
     """
-    scope = get_supervisor_scope(user, db)
+    scope = visible_sub_centres(user, db)
+    # The caller's own district, so a village the gazetteer doesn't know
+    # is placed inside it rather than somewhere else in the state.
+    me = db.query(Worker).filter(Worker.worker_id == user.worker_id).first()
+    district = me.district_id if me else None
     rows = (
         _scoped_visits(db, scope)
         .join(Patient, Visit.patient_id == Patient.patient_id)
@@ -103,7 +108,7 @@ def heatmap(
     for name, entry in villages.items():
         levels = [level for _, level in entry["latest"].values()]
         counts = {level: levels.count(level) for level in _RISK_ORDER}
-        lat, lng, approximate = geo.locate(name)
+        lat, lng, approximate = geo.locate(name, district)
         points.append(
             RiskPoint(
                 lat=lat,
@@ -135,7 +140,7 @@ def metrics(
     db: DbSession,
     user=Depends(require_roles("anm", "bmo", "admin")),
 ) -> DashboardMetrics:
-    scope = get_supervisor_scope(user, db)
+    scope = visible_sub_centres(user, db)
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
     base = _scoped_visits(db, scope)
@@ -148,8 +153,8 @@ def metrics(
         .join(Worker, Visit.worker_id == Worker.worker_id)
         .filter(Action.type == "followup", Action.status == "pending")
     )
-    if scope:
-        pending_followups_q = pending_followups_q.filter(Worker.sub_centre_id == scope)
+    if scope is not None:
+        pending_followups_q = pending_followups_q.filter(Worker.sub_centre_id.in_(scope))
     pending_followups = pending_followups_q.count()
 
     total_visits = base.count()
@@ -169,7 +174,7 @@ def analytics(
     db: DbSession,
     user=Depends(require_roles("anm", "bmo", "admin")),
 ) -> DashboardAnalytics:
-    scope = get_supervisor_scope(user, db)
+    scope = visible_sub_centres(user, db)
     now = datetime.now(timezone.utc)
     window_start = (now - timedelta(days=TREND_WINDOW_DAYS - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
 
@@ -207,8 +212,8 @@ def analytics(
         .join(Worker, Visit.worker_id == Worker.worker_id)
         .filter(Action.type == "followup")
     )
-    if scope:
-        followup_q = followup_q.filter(Worker.sub_centre_id == scope)
+    if scope is not None:
+        followup_q = followup_q.filter(Worker.sub_centre_id.in_(scope))
     all_followups = followup_q.all()
     done = sum(1 for a in all_followups if a.status == "done")
     overdue = sum(1 for a in all_followups if a.status == "pending" and a.due_at and a.due_at.replace(tzinfo=timezone.utc) < now)
@@ -267,12 +272,12 @@ def followup_compliance(
     an absent row is ambiguous (no work, or no data?) and 'everyone else
     is clear' is itself the answer a supervisor is looking for.
     """
-    scope = get_supervisor_scope(user, db)
+    scope = visible_sub_centres(user, db)
     now = datetime.now(timezone.utc)
 
     workers = db.query(Worker).filter(Worker.role == "asha")
-    if scope:
-        workers = workers.filter(Worker.sub_centre_id == scope)
+    if scope is not None:
+        workers = workers.filter(Worker.sub_centre_id.in_(scope))
     workers = workers.order_by(Worker.name).all()
     by_worker = {
         w.worker_id: WorkerFollowupCompliance(

@@ -12,7 +12,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import aliased
 
-from app.api.deps import DbSession, get_supervisor_scope, require_roles, require_worker_access
+from app.api.deps import (
+    DbSession,
+    get_supervisor_scope,
+    require_roles,
+    require_worker_access,
+    visible_sub_centres,
+)
 from app.core.config import get_settings
 from app.db.models.action import Action
 from app.db.models.patient import Patient
@@ -257,16 +263,21 @@ def list_all_patients(
     page filters this list client-side (gender, risk level, registration
     date, name search) -- this endpoint just returns the properly-scoped
     set for it to filter."""
-    scope = get_supervisor_scope(user, db)
-    effective_sub_centre = scope or sub_centre_id
+    allowed = visible_sub_centres(user, db)
 
     rows = (
         db.query(Patient, Worker)
         .join(Worker, Patient.worker_id == Worker.worker_id)
         .filter(Worker.role == "asha")
     )
-    if effective_sub_centre:
-        rows = rows.filter(Worker.sub_centre_id == effective_sub_centre)
+    if allowed is not None:
+        rows = rows.filter(Worker.sub_centre_id.in_(allowed))
+    # A caller may narrow further, never widen: the requested sub-centre
+    # is intersected with what they may see, not substituted for it.
+    if sub_centre_id and (allowed is None or sub_centre_id in allowed):
+        rows = rows.filter(Worker.sub_centre_id == sub_centre_id)
+    elif sub_centre_id:
+        raise HTTPException(status_code=403, detail="That sub-centre is outside your area")
     rows = rows.order_by(Patient.created_at.desc()).all()
 
     patient_ids = [p.patient_id for p, _ in rows]
@@ -331,7 +342,13 @@ def list_all_patients(
         user_id=user.worker_id,
         action_type="patient.directory_view",
         record_type="patient",
-        details={"sub_centre_id": effective_sub_centre, "result_count": len(entries)},
+        # What was actually read, not what was asked for: the audit trail
+        # should show the scope the query ran under (NFR-SC4).
+        details={
+            "sub_centre_id": sub_centre_id,
+            "scoped_to": allowed,
+            "result_count": len(entries),
+        },
     )
     return PatientDirectoryResponse(
         patients=entries,
@@ -433,9 +450,9 @@ def patient_history(
 
     if user.role == "asha" and patient.worker_id not in cover.visible_worker_ids(db, user.worker_id):
         raise HTTPException(status_code=403, detail="Not your patient")
-    scope = get_supervisor_scope(user, db)
-    if scope and (worker is None or worker.sub_centre_id != scope):
-        raise HTTPException(status_code=403, detail="Patient is outside your sub-centre")
+    allowed = visible_sub_centres(user, db)
+    if allowed is not None and (worker is None or worker.sub_centre_id not in allowed):
+        raise HTTPException(status_code=403, detail="Patient is outside your area")
 
     rows = (
         db.query(Visit, RiskFlag, OverridingWorker, RiskResolution, ResolvingWorker)

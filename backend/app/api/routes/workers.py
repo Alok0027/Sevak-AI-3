@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import aliased
 
-from app.api.deps import DbSession, get_supervisor_scope, require_roles
+from app.api.deps import DbSession, require_roles, visible_sub_centres
 from app.db.models.absence import WorkerAbsence
 from app.db.models.patient import Patient
 from app.db.models.risk_flag import RiskFlag
@@ -48,9 +48,11 @@ def list_workers(
     sub_centre_id: str | None = Query(default=None, description="BMO/Admin only: filter to one sub-centre"),
     search: str | None = Query(default=None, description="Filter by worker name (case-insensitive substring)"),
 ) -> WorkerRosterResponse:
-    scope = get_supervisor_scope(user, db)
-    # An ANM's scope always wins over any sub_centre_id they might pass.
-    effective_sub_centre = scope or sub_centre_id
+    allowed = visible_sub_centres(user, db)
+    # A caller may narrow within what they may see, never widen past it.
+    if sub_centre_id and allowed is not None and sub_centre_id not in allowed:
+        raise HTTPException(status_code=403, detail="That sub-centre is outside your area")
+    effective_sub_centre = sub_centre_id or allowed
     stats = list_worker_stats(db, sub_centre_id=effective_sub_centre, search=search)
     return WorkerRosterResponse(workers=stats)
 
@@ -67,11 +69,11 @@ def worker_history(
     if user.role == "asha" and worker_id != user.worker_id:
         raise HTTPException(status_code=403, detail="Not your worker record")
 
-    scope = get_supervisor_scope(user, db)
+    allowed = visible_sub_centres(user, db)
     stats = get_worker_stats(db, worker_id)
     if stats is None:
         raise HTTPException(status_code=404, detail="Worker not found")
-    if scope and stats.sub_centre_id != scope:
+    if allowed is not None and stats.sub_centre_id not in allowed:
         # ANM tried to reach another sub-centre's worker -- SRS table 4:
         # "Cannot access district-level data".
         raise HTTPException(status_code=403, detail="Worker is outside your sub-centre")
@@ -326,12 +328,12 @@ def list_absences(
         .filter(WorkerAbsence.ends_on >= today, WorkerAbsence.ended_at.is_(None))
         .order_by(WorkerAbsence.starts_on)
     )
-    scope = get_supervisor_scope(user, db)
+    allowed = visible_sub_centres(user, db)
     absences = query.all()
-    if scope:
+    if allowed is not None:
         in_scope = {
             w.worker_id
-            for w in db.query(Worker).filter(Worker.sub_centre_id == scope).all()
+            for w in db.query(Worker).filter(Worker.sub_centre_id.in_(allowed)).all()
         }
         absences = [a for a in absences if a.worker_id in in_scope]
     return AbsenceListResponse(absences=[_absence_summary(db, a, today) for a in absences])

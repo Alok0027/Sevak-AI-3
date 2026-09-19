@@ -64,6 +64,32 @@ def worker_code(role: str, sub_centre_id: str | None, serial: int) -> str:
     return f"{prefix}-{area}-{serial:03d}" if area else f"{prefix}-{serial:03d}"
 
 
+# ── District ────────────────────────────────────────────────────────────
+
+
+def district_code(sub_centre_id: str | None) -> str | None:
+    """The district a sub-centre belongs to: "SC-PUNE-01" -> "PUNE".
+
+    Same convention worker_code() and phc_name() already read out of a
+    sub-centre id -- the area token, without the "SC-" that only says
+    "sub-centre" and without the serial that says which sub-centre in the
+    area. Several sub-centres in one area belong to one district, which
+    is exactly the grouping a BMO supervises (SRS table 4: "district-level
+    health authority overseeing multiple sub-centres").
+
+    There is no facility or district registry in this schema, so this
+    recovers the district from the identifier the project already uses
+    rather than inventing a second source of truth. Returns None when
+    there is no sub-centre to key off, and the caller must fail closed
+    rather than treat that as "every district".
+    """
+    area = _slug(sub_centre_id)
+    if area.startswith("SC-"):
+        area = area[3:]
+    area = re.sub(r"-\d+$", "", area)
+    return area or None
+
+
 # ── PHC name ────────────────────────────────────────────────────────────
 
 

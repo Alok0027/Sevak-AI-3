@@ -14,13 +14,19 @@ from app.schemas.worker import WorkerStats
 
 def list_worker_stats(
     db: Session,
-    sub_centre_id: str | None = None,
+    sub_centre_id: str | list[str] | None = None,
     search: str | None = None,
     worker_id: str | None = None,
 ) -> list[WorkerStats]:
+    """`sub_centre_id` takes one sub-centre or a list of them -- a BMO is
+    scoped to every sub-centre in her district, not to a single one (see
+    deps.visible_sub_centres). An empty list means "no sub-centres in
+    scope" and correctly returns nothing; None means unrestricted."""
     query = db.query(Worker).filter(Worker.role == "asha")
-    if sub_centre_id:
+    if isinstance(sub_centre_id, str):
         query = query.filter(Worker.sub_centre_id == sub_centre_id)
+    elif sub_centre_id is not None:
+        query = query.filter(Worker.sub_centre_id.in_(sub_centre_id))
     if search:
         query = query.filter(Worker.name.ilike(f"%{search}%"))
     if worker_id:

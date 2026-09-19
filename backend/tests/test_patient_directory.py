@@ -29,24 +29,25 @@ def _seed():
         db.close()
 
 
-def _seed_patient_outside_pune01():
-    """One ASHA and one patient in a second sub-centre, so "district-wide
-    really is wider than one sub-centre" has something to be true about.
-    Idempotent, so repeated calls within a run don't multiply rows."""
+def _seed_asha_with_patient(*, phone: str, name: str, sub_centre_id: str, patient_name: str):
+    """One ASHA and one patient in a given sub-centre. Idempotent, so
+    repeated calls within a run don't multiply rows."""
     from app.core.security import hash_pin
     from app.db.models.patient import Patient
     from app.db.models.worker import Worker
+    from app.services import identity
 
     db = SessionLocal()
     try:
-        worker = db.query(Worker).filter(Worker.phone == "9999990077").first()
+        worker = db.query(Worker).filter(Worker.phone == phone).first()
         if worker is None:
             worker = Worker(
-                name="Tanvi Kohli",
-                phone="9999990077",
+                name=name,
+                phone=phone,
                 pin_hash=hash_pin("1234"),
                 language_pref="mr",
-                sub_centre_id="SC-TEST-OUTSIDE",
+                sub_centre_id=sub_centre_id,
+                district_id=identity.district_code(sub_centre_id),
                 role="asha",
             )
             db.add(worker)
@@ -55,10 +56,28 @@ def _seed_patient_outside_pune01():
 
         exists = db.query(Patient).filter(Patient.worker_id == worker.worker_id).first()
         if exists is None:
-            db.add(Patient(worker_id=worker.worker_id, name="Outside Sub-Centre Patient", age=30))
+            db.add(Patient(worker_id=worker.worker_id, name=patient_name, age=30))
             db.commit()
     finally:
         db.close()
+
+
+def _seed_second_pune_sub_centre():
+    """A second sub-centre inside the BMO's own district (PUNE), so
+    "a BMO sees more than one sub-centre" has something to be true of."""
+    _seed_asha_with_patient(
+        phone="9999990078", name="Asha Pawar", sub_centre_id="SC-PUNE-02",
+        patient_name="Second Sub-Centre Patient",
+    )
+
+
+def _seed_patient_in_another_district():
+    """An ASHA in a different district entirely. A Pune BMO must not be
+    able to read her patients."""
+    _seed_asha_with_patient(
+        phone="9999990077", name="Tanvi Kohli", sub_centre_id="SC-NASHIK-01",
+        patient_name="Other District Patient",
+    )
 
 
 def test_asha_cannot_use_the_district_wide_directory():
@@ -91,31 +110,49 @@ def test_anm_sees_her_sub_centres_patients_including_meera():
         assert meera["worker_name"] == "Sunita Sharma"
 
 
-def test_bmo_sees_district_wide_and_can_filter_to_one_sub_centre():
+def test_bmo_sees_every_sub_centre_in_her_district_and_none_outside_it():
+    """SRS table 4: a BMO oversees multiple sub-centres -- within one
+    district. This used to assert only the first half, and passed because
+    the endpoint applied no filter at all for a BMO: "district-wide" was
+    implemented as "every row in the database", which in a real
+    deployment is every district in the state."""
     with TestClient(app) as client:
         _seed()
-        # Create the second sub-centre this test needs rather than hoping
-        # one is lying around. It used to rely on the database already
-        # containing patients from other sub-centres, which was true only
-        # because the suite shared the dev database and earlier runs had
-        # left some behind -- so the test passed for a reason that had
-        # nothing to do with the code under test.
-        _seed_patient_outside_pune01()
+        _seed_second_pune_sub_centre()
+        _seed_patient_in_another_district()
 
-        bmo = _login(client, "9999999902", "1234")
+        bmo = _login(client, "9999999902", "1234")  # Dr. Vikram Rao, PUNE
         headers = {"Authorization": f"Bearer {bmo['access_token']}"}
 
         district_wide = client.get("/api/v1/patients", headers=headers)
         assert district_wide.status_code == 200
         all_patients = district_wide.json()["patients"]
+
+        # Wider than one sub-centre...
         assert any(p["name"] == "Meera Patil" for p in all_patients)
-        assert any(p["sub_centre_id"] != "SC-PUNE-01" for p in all_patients)
+        assert any(p["sub_centre_id"] == "SC-PUNE-02" for p in all_patients)
+        # ...and no wider than one district.
+        assert all(p["sub_centre_id"].startswith("SC-PUNE-") for p in all_patients)
+        assert not any(p["name"] == "Other District Patient" for p in all_patients)
 
         scoped = client.get("/api/v1/patients", headers=headers, params={"sub_centre_id": "SC-PUNE-01"})
         assert scoped.status_code == 200
         scoped_patients = scoped.json()["patients"]
         assert all(p["sub_centre_id"] == "SC-PUNE-01" for p in scoped_patients)
         assert len(scoped_patients) < len(all_patients)
+
+
+def test_a_bmo_cannot_reach_another_districts_sub_centre_by_asking_for_it():
+    """The sub_centre_id parameter narrows what a caller may see; it must
+    not be a way around the scope."""
+    with TestClient(app) as client:
+        _seed()
+        _seed_patient_in_another_district()
+
+        bmo = _login(client, "9999999902", "1234")
+        headers = {"Authorization": f"Bearer {bmo['access_token']}"}
+        resp = client.get("/api/v1/patients", headers=headers, params={"sub_centre_id": "SC-NASHIK-01"})
+        assert resp.status_code == 403
 
 
 def test_directory_reflects_a_real_visit_risk_level():

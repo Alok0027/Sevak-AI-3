@@ -208,7 +208,7 @@ async def deliver_escalation_alerts(db: Session, whatsapp_client=None, sms_clien
     return sent
 
 
-def get_pending_escalations(db: Session, sub_centre_id: str | None = None) -> list[dict]:
+def get_pending_escalations(db: Session, sub_centre_id: str | list[str] | None = None) -> list[dict]:
     """FR-06.2: BMO/ANM dashboard feed -- all unactioned HIGH risk cases
     sorted by time elapsed since flag, regardless of whether the 48h
     auto-escalation has fired yet (so a supervisor sees it coming, not just
@@ -226,8 +226,12 @@ def get_pending_escalations(db: Session, sub_centre_id: str | None = None) -> li
         .join(Worker, Visit.worker_id == Worker.worker_id)
         .filter(RiskFlag.risk_level == "HIGH", RiskFlag.actioned_at.is_(None))
     )
-    if sub_centre_id:
+    if isinstance(sub_centre_id, str):
         query = query.filter(Worker.sub_centre_id == sub_centre_id)
+    elif sub_centre_id is not None:
+        # A BMO is scoped to her district's sub-centres, not to one of
+        # them; an empty list is "nothing in scope", not "everything".
+        query = query.filter(Worker.sub_centre_id.in_(sub_centre_id))
 
     results = []
     for flag, visit, patient, worker in query.all():

@@ -69,16 +69,62 @@ def get_supervisor_scope(user: CurrentUser, db: Session) -> str | None:
     return worker.sub_centre_id
 
 
+def visible_sub_centres(user: CurrentUser, db: Session) -> list[str] | None:
+    """Every sub-centre this caller may read. None means unrestricted.
+
+    SRS table 4 gives the two supervisors different reach, and until this
+    existed only one of them was actually enforced:
+
+    - An ANM sees her own sub-centre. ("Cannot access district-level
+      data.")
+    - A BMO sees the sub-centres in her own district, and no further.
+      ("District-level health authority overseeing multiple sub-centres.")
+      This used to return None for a BMO -- no filter at all -- which in
+      a single-district demo database looks identical to district scoping
+      and in a real multi-district deployment means every BMO in the
+      state can read every other district's patients.
+    - An Admin is unrestricted here, because the admin role administers
+      the system rather than a place. (Note that SRS table 4 also says an
+      Admin has *no* patient record access at all; that is a separate
+      gap, not one this function can close.)
+
+    Fails closed: a supervisor with nothing to scope by gets a 403, never
+    the whole country.
+    """
+    if user.role == "admin":
+        return None
+
+    from app.db.models.worker import Worker  # local import: circular at module load
+
+    me = db.query(Worker).filter(Worker.worker_id == user.worker_id).first()
+    if me is None:
+        raise HTTPException(status_code=403, detail="Your account no longer exists")
+
+    if user.role == "bmo":
+        if not me.district_id or not me.district_id.strip():
+            raise HTTPException(status_code=403, detail="BMO has no assigned district")
+        rows = (
+            db.query(Worker.sub_centre_id)
+            .filter(Worker.district_id == me.district_id, Worker.sub_centre_id.isnot(None))
+            .distinct()
+        )
+        return sorted({sub_centre_id for (sub_centre_id,) in rows})
+
+    if not me.sub_centre_id or not me.sub_centre_id.strip():
+        raise HTTPException(status_code=403, detail="No assigned sub-centre")
+    return [me.sub_centre_id]
+
+
 def require_worker_access(user: CurrentUser, db: Session, worker_id: str) -> None:
     """Guard worker-addressed reads without changing existing role policy."""
     if user.role == "asha":
         if worker_id != user.worker_id:
             raise HTTPException(status_code=403, detail="Not your worker record")
         return
-    scope = get_supervisor_scope(user, db)
-    if scope is not None:
+    allowed = visible_sub_centres(user, db)
+    if allowed is not None:
         from app.db.models.worker import Worker
 
         worker = db.get(Worker, worker_id)
-        if worker is None or worker.sub_centre_id != scope:
-            raise HTTPException(status_code=403, detail="Worker is outside your sub-centre")
+        if worker is None or worker.sub_centre_id not in allowed:
+            raise HTTPException(status_code=403, detail="Worker is outside your area")

@@ -111,6 +111,8 @@ _ADDED_COLUMNS: dict[str, dict[str, str]] = {
     # on NULL, fail the "is this account active" check in login(), and lock
     # the whole deployment out at the exact moment this code shipped.
     "workers": {
+        # Role scoping's second axis -- see Worker.district_id.
+        "district_id": "TEXT",
         "status": "TEXT NOT NULL DEFAULT 'active'",
         "approved_by": "TEXT",
         "approved_at": "TIMESTAMP",
@@ -192,6 +194,7 @@ def backfill_identity() -> None:
     db = SessionLocal()
     try:
         _backfill_worker_codes(db, Worker, identity)
+        _backfill_worker_districts(db, Worker, identity)
         _backfill_patient_keys(db, Patient, identity)
         db.commit()
     except Exception:  # noqa: BLE001
@@ -202,6 +205,39 @@ def backfill_identity() -> None:
         raise
     finally:
         db.close()
+
+
+def _backfill_worker_districts(db, Worker, identity) -> None:
+    """Fill in Worker.district_id for rows that predate the column.
+
+    Anyone posted to a sub-centre gets their district read straight out
+    of it. That covers every ASHA and ANM, and any BMO who has one.
+
+    A BMO with no sub-centre at all is the awkward case: the column
+    exists precisely so a BMO is confined to one district, and there is
+    no honest way to invent which. The single exception is a database
+    that only contains one district -- then there is exactly one answer
+    and no guess involved. Anything more than that is left NULL, and
+    deps.py fails that BMO closed with a message telling them to get a
+    district assigned, rather than quietly handing back the state.
+    """
+    pending = db.query(Worker).filter(Worker.district_id.is_(None)).all()
+    if not pending:
+        return
+
+    for worker in pending:
+        worker.district_id = identity.district_code(worker.sub_centre_id)
+
+    districts = {
+        identity.district_code(sub_centre_id)
+        for (sub_centre_id,) in db.query(Worker.sub_centre_id).distinct()
+        if identity.district_code(sub_centre_id)
+    }
+    if len(districts) == 1:
+        only = districts.pop()
+        for worker in pending:
+            if worker.district_id is None and worker.role in ("bmo", "admin"):
+                worker.district_id = only
 
 
 def _backfill_worker_codes(db, Worker, identity) -> None:

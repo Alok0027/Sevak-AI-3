@@ -81,8 +81,13 @@ def seed_demo_fixtures(db) -> None:
         name="Dr. Rekha Joshi", phone="9999999901", pin_hash=hash_pin("1234"),
         role="anm", sub_centre_id="SC-PUNE-01",
     )
+    # A BMO supervises a district, not a sub-centre -- so district_id is
+    # set directly rather than derived from a posting. Without it she is
+    # failed closed by deps.visible_sub_centres instead of being handed
+    # every district in the database.
     bmo = Worker(
         name="Dr. Vikram Rao", phone="9999999902", pin_hash=hash_pin("1234"), role="bmo",
+        district_id="PUNE",
     )
     admin = Worker(
         name="Admin User", phone="9999999903", pin_hash=hash_pin("1234"), role="admin",

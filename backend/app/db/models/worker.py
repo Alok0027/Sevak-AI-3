@@ -23,6 +23,20 @@ class Worker(Base):
     pin_hash: Mapped[str] = mapped_column(String, nullable=False)
     language_pref: Mapped[str] = mapped_column(String, default="hi")  # ISO-ish code: hi, mr, ta, te, bn
     sub_centre_id: Mapped[str] = mapped_column(String, nullable=True)
+
+    # The district this worker belongs to ("PUNE"), and the unit a BMO is
+    # scoped to (SRS table 4: a BMO oversees multiple sub-centres in one
+    # district; an ANM is scoped tighter, to her own sub_centre_id).
+    #
+    # Derived from sub_centre_id by identity.district_code() for anyone
+    # who has one, and set directly for a BMO, who supervises a district
+    # without being posted to a single sub-centre within it. Filled in by
+    # the backfill in app/db/session.py for rows that predate the column.
+    #
+    # Nullable in the schema, never optional in effect: deps.py fails a
+    # supervisor closed when it is missing rather than falling back to
+    # "every district", which is what this column exists to prevent.
+    district_id: Mapped[str] = mapped_column(String, nullable=True, index=True)
     role: Mapped[str] = mapped_column(String, default="asha")  # asha | anm | bmo | admin
 
     # The identifier a person can read aloud: ASHA-PUNE-01-007.
