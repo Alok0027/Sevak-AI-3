@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { fetchPatientHistory, overrideRisk, resolveRisk } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import AppShell from "../components/AppShell";
@@ -43,40 +43,19 @@ export default function PatientDetailPage() {
   // Resolving an open HIGH case with a mandatory clinical-review note --
   // same anm/bmo roles as override, but a separate action: it does not
   // relabel the visit, it just closes the case out (see resolve-risk on
-  // the backend). Lives here, on the patient's own record, rather than as
-  // a bare button in the Overview escalation table.
-  const [searchParams, setSearchParams] = useSearchParams();
+  // the backend). Lives ONLY here, on the patient's own record -- the
+  // Overview escalation table is read-only triage and has no path into
+  // this, by design (see EscalationList).
   const [resolvingVisitId, setResolvingVisitId] = useState(null);
   const [resolveNote, setResolveNote] = useState("");
   const [resolveError, setResolveError] = useState(null);
   const [resolveSubmitting, setResolveSubmitting] = useState(false);
-  const [autoResolveDone, setAutoResolveDone] = useState(false);
 
   useEffect(() => {
     fetchPatientHistory(patientId)
       .then(setData)
       .catch((err) => setError(err.response?.data?.detail || "Failed to load patient"));
   }, [patientId]);
-
-  // The Overview escalation list links straight into a specific visit's
-  // resolve form (?resolve=<visit_id>) instead of resolving inline itself
-  // -- see EscalationList. Honour that once the timeline has loaded, then
-  // drop the param so a cancel or later refresh doesn't keep reopening it.
-  useEffect(() => {
-    if (autoResolveDone || !data) return;
-    const targetId = searchParams.get("resolve");
-    if (targetId && data.visits.some((v) => v.visit_id === targetId)) {
-      setExpanded(targetId);
-      setResolvingVisitId(targetId);
-      setResolveNote("");
-      setResolveError(null);
-    }
-    setAutoResolveDone(true);
-    if (targetId) {
-      searchParams.delete("resolve");
-      setSearchParams(searchParams, { replace: true });
-    }
-  }, [data, autoResolveDone, searchParams, setSearchParams]);
 
   function startOverride(e, visit) {
     e.stopPropagation();

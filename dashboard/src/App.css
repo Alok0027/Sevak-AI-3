@@ -804,12 +804,24 @@ table.data td.drivers {
 /* A map needs real height to be legible, not "whatever's left after a
    heading" the way a recharts card gets it -- so this overrides
    .chart-card's flex sizing with a fixed height instead of inheriting
-   it, at a scale that reads on a projector as easily as a monitor. */
+   it, at a scale that reads on a projector as easily as a monitor.
+   `height: 420px` alone doesn't actually win that override: with
+   `.chart-card > :last-child` setting `flex: 1` (flex-basis: 0%), a
+   flex item's main-axis size is computed from the flex-basis, not from
+   its `height` property, so the map was being laid out at ~0px tall on
+   first paint -- Leaflet measures its container exactly once at mount,
+   so it built its whole tile grid for that 0px box and a later CSS
+   resize never told it to remeasure. Blank map, not a data problem.
+   `.heatmap-card > .heatmap-map` matches `.chart-card > :last-child`'s
+   specificity and comes later in the file, so `flex: none` here is what
+   actually restores the fixed height as the real, definite size Leaflet
+   sees at mount. */
 .heatmap-card {
   padding: var(--s4);
 }
 
-.heatmap-map {
+.heatmap-card > .heatmap-map {
+  flex: none;
   height: 420px;
   width: 100%;
   border-radius: calc(var(--radius) - 4px);

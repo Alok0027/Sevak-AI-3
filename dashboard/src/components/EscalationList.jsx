@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSortableData } from "../hooks/useSortableData";
 import { Empty } from "./Surface";
-import { useAuth } from "../context/AuthContext";
 
 /** FR-06.2: unactioned HIGH risk cases -- enriched with patient/worker
  * context and the actual clinical drivers, not just a bare name.
@@ -15,12 +14,12 @@ import { useAuth } from "../context/AuthContext";
 export default function EscalationList({ escalations, showSubCentre }) {
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState(null);
-  const { auth } = useAuth();
-  // Resolving a case (with its mandatory clinical-review note) happens on
-  // the patient's own profile now, not as a one-click action buried in
-  // this table -- see PatientDetailPage. This list just links there; the
-  // row drops off on its own once DashboardPage's next poll re-fetches
-  // /escalations/pending and the case is no longer unactioned.
+  // Resolving a case (with its mandatory clinical-review note) is a
+  // patient-profile-only action now -- see PatientDetailPage. This list
+  // is read-only triage; a supervisor clicks the patient's name (below)
+  // to go review and resolve there. The row drops off on its own once
+  // DashboardPage's next poll re-fetches /escalations/pending and the
+  // case is no longer unactioned -- no local "resolved" state to track.
   const { sorted, sortKey, direction, requestSort } = useSortableData(escalations, "hours_elapsed", "desc");
 
   if (escalations.length === 0) {
@@ -98,18 +97,6 @@ export default function EscalationList({ escalations, showSubCentre }) {
                     {escalated && <div className="cell-sub">past 48h</div>}
                   </td>
                   <td className="drivers">
-                    {['anm', 'bmo'].includes(auth?.role) && (
-                      <button
-                        type="button"
-                        className="btn-quiet"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          navigate(`/patients/${e.patient_id}?resolve=${e.visit_id}`);
-                        }}
-                      >
-                        Review &amp; resolve in patient profile →
-                      </button>
-                    )}
                     {isOpen ? (
                       e.drivers.length > 0 ? (
                         <>
