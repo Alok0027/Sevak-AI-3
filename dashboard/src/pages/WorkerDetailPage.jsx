@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { fetchWorkerHistory } from "../api/client";
+import { fetchWorkerHistory, fetchHmisPdf } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { useSortableData } from "../hooks/useSortableData";
 import AppShell from "../components/AppShell";
@@ -23,6 +23,12 @@ export default function WorkerDetailPage() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [riskFilter, setRiskFilter] = useState("all");
+  // FR-05.1/05.2/05.3: the current month by default -- a supervisor
+  // reaching for "the HMIS report" almost always means the one due now,
+  // not a historical one she'd have to think to go looking for.
+  const [reportMonth, setReportMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportError, setReportError] = useState(null);
 
   const load = useCallback(() => {
     fetchWorkerHistory(workerId)
@@ -31,6 +37,33 @@ export default function WorkerDetailPage() {
   }, [workerId]);
 
   useEffect(load, [load]);
+
+  // A downloaded file, not an inline preview -- reportlab already lays
+  // this out to the NHM HMIS format (FR-05.3), which a supervisor is
+  // meant to print or forward, not read in a browser tab. Fetched
+  // through the authenticated client rather than a bare href because the
+  // route sits behind the same worker-access check as everything else
+  // (see fetchHmisPdf).
+  const handleDownloadReport = useCallback(async () => {
+    const [year, month] = reportMonth.split("-").map(Number);
+    setReportBusy(true);
+    setReportError(null);
+    try {
+      const blob = await fetchHmisPdf(workerId, month, year);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `hmis_${workerId}_${year}_${String(month).padStart(2, "0")}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setReportError(err.response?.data?.detail || "Could not generate the report. Try again.");
+    } finally {
+      setReportBusy(false);
+    }
+  }, [workerId, reportMonth]);
 
   const visits = useMemo(() => {
     if (!data) return [];
@@ -110,6 +143,24 @@ export default function WorkerDetailPage() {
       />
 
       {canReassign && <CaseloadHandover worker={w} onDone={load} />}
+
+      <Section
+        title="Monthly HMIS report"
+        sub="Auto-populated from every visit she recorded that month (FR-05.1), including the RCH register of maternal and under-5 patients (FR-05.2) -- NHM-format PDF."
+      >
+        <div className="filters">
+          <input
+            type="month"
+            value={reportMonth}
+            onChange={(e) => setReportMonth(e.target.value)}
+            aria-label="Report month"
+          />
+          <button className="btn-quiet" onClick={handleDownloadReport} disabled={reportBusy}>
+            {reportBusy ? "Generating…" : "Download PDF"}
+          </button>
+        </div>
+        {reportError && <p className="error">{reportError}</p>}
+      </Section>
 
       <Section
         title="Visit history"

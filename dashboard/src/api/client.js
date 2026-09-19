@@ -241,4 +241,16 @@ export async function fetchHmisReport(workerId, month, year) {
   return data;
 }
 
+// FR-05.3: the PDF has to come from the same authenticated axios client
+// as everything else, not a bare <a href> -- the download route sits
+// behind require_roles like the rest of the API, and a plain link never
+// carries the bearer token, so it would just 401. responseType "blob"
+// hands back the raw PDF bytes so the caller can save it client-side.
+export async function fetchHmisPdf(workerId, month, year) {
+  const { data } = await client.get(`/api/v1/reports/hmis/${workerId}/${month}/${year}/pdf`, {
+    responseType: "blob",
+  });
+  return data;
+}
+
 export default client;
