@@ -11,6 +11,7 @@ from langgraph.graph import END, StateGraph
 from app.agents import agent1_voice_comprehension as agent1
 from app.agents import agent2_risk_classification as agent2
 from app.agents import agent3_action_generation as agent3
+from app.services.identity import phc_name as resolve_phc_name
 from app.agents import agent4_reporting as agent4
 from app.agents.state import PipelineState
 from app.services.bhashini_client import BhashiniClientBase
@@ -71,6 +72,11 @@ def build_pipeline_graph(
             llm_client=llm_client,
             whatsapp_client=whatsapp_client,
             sms_client=sms_client,
+            # FR-04.1: the patient's own sub-centre's PHC, not a hardcoded
+            # placeholder -- see identity.phc_name for why this recovers
+            # a fact the deployment already has rather than a guess.
+            phc_name=resolve_phc_name(state.get("sub_centre_id")),
+            language_code=state.get("language_code") or "hi",
         )
         return {"actions": actions}
 

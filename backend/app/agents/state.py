@@ -18,6 +18,12 @@ class PipelineState(TypedDict, total=False):
     patient_id: str
     patient_name: str
     patient_phone: str | None
+    # FR-04.1: which PHC a HIGH-risk referral names -- set from the
+    # patient's own sub_centre_id in run_voice_visit, not from the
+    # worker's, because a caseload reassignment moves who visits her, not
+    # which PHC she belongs to (same rule Patient.sub_centre_id itself
+    # documents).
+    sub_centre_id: str | None
     audio_base64: str
     language_code: str
     # FR-01.4: when set, the ASHA has already reviewed/edited the transcript

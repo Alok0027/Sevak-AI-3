@@ -87,6 +87,7 @@ async def run_voice_visit(
         "patient_id": patient_id,
         "patient_name": patient.name,
         "patient_phone": patient.phone,
+        "sub_centre_id": patient.sub_centre_id,
         "language_code": language_code,
     }
     if confirmed_transcript:

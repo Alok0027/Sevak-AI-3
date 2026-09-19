@@ -64,6 +64,38 @@ def worker_code(role: str, sub_centre_id: str | None, serial: int) -> str:
     return f"{prefix}-{area}-{serial:03d}" if area else f"{prefix}-{serial:03d}"
 
 
+# ── PHC name ────────────────────────────────────────────────────────────
+
+
+def phc_name(sub_centre_id: str | None, default: str = "Primary Health Centre") -> str:
+    """The Primary Health Centre a sub-centre's HIGH-risk referrals go to
+    (FR-04.1).
+
+    Derived from the sub-centre id with the same convention worker_code()
+    above already uses ("SC-PUNE-01" -> "PUNE-01" -> "Pune"), because
+    there is no facility registry in this schema yet (see the deployment
+    section of the top-level README). SC-PUNE-01 -> "Pune PHC", which is
+    also the name the SRS demo script (section 9) already uses for that
+    exact sub-centre -- so this is recovering a fact the project already
+    has, not inventing one.
+
+    Falls back to `default` when there is no sub-centre to key off (a
+    worker or patient with none set) rather than guessing.
+    """
+    area = _slug(sub_centre_id)
+    if area.startswith("SC-"):
+        area = area[3:]
+    # "PUNE-01" -> "PUNE": the serial suffix tells you which sub-centre in
+    # the area, not which facility -- several sub-centres in one area
+    # share a PHC in a real deployment, and "Pune-01 PHC" would invent a
+    # distinction the health system doesn't draw.
+    area = re.sub(r"-\d+$", "", area)
+    if not area:
+        return default
+    words = area.replace("-", " ").split()
+    return f"{' '.join(w.capitalize() for w in words)} PHC"
+
+
 # ── Villages ────────────────────────────────────────────────────────────
 
 

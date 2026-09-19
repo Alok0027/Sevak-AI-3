@@ -408,5 +408,8 @@ def test_override_to_high_drafts_a_referral_if_none_exists():
             active = [r for r in referrals if r.status != "cancelled"]
             assert len(active) == 1, [(r.status, r.content[:40]) for r in referrals]
             assert "severe headache" in active[0].content
+            # FR-04.1: this used to hardcode "Primary Health Centre"
+            # regardless of the patient's own sub-centre (SC-PUNE-01).
+            assert "Pune PHC" in active[0].content
         finally:
             db.close()
