@@ -85,7 +85,7 @@ def two_districts():
                          role="asha", sub_centre_id="SC-NASHIK-01")
         _worker(db, phone=NASHIK_BMO_PHONE, name="Dr. Nashik BMO",
                 role="bmo", district_id="NASHIK")
-        _patient_with_visit(db, pune2, name="Pune Two Patient", village="Shirur")
+        _patient_with_visit(db, pune2, name="Pune Two Patient", village="Wadeshwar Colony")
         _patient_with_visit(db, nashik, name="Nashik Patient", village="Sinnar")
         yield
     finally:
@@ -106,7 +106,7 @@ def test_the_heatmap_shows_the_bmos_own_district_only(pune_bmo):
     resp = client.get("/api/v1/dashboard/heatmap", headers=headers)
     assert resp.status_code == 200
     villages = {p["village"] for p in resp.json()["risk_points"]}
-    assert "Shirur" in villages           # SC-PUNE-02, same district
+    assert "Wadeshwar Colony" in villages           # SC-PUNE-02, same district
     assert "Sinnar" not in villages       # Nashik's village
 
 
@@ -119,7 +119,10 @@ def test_an_anm_sees_only_her_own_sub_centre_on_the_heatmap(two_districts):
         villages = {
             p["village"] for p in client.get("/api/v1/dashboard/heatmap", headers=headers).json()["risk_points"]
         }
-        assert "Shirur" not in villages   # SC-PUNE-02 -- her district, not her sub-centre
+        assert "Wadeshwar Colony" not in villages   # SC-PUNE-02 -- her district, not her sub-centre
+        # Not drawn from seed_synthetic_data.VILLAGES, so a randomly-seeded
+        # demo patient can never coincidentally land here (see test_heatmap.py
+        # for the analogous village-name collision this sidesteps).
         assert "Sinnar" not in villages
 
 
@@ -219,6 +222,24 @@ def test_a_bmo_cannot_resolve_a_risk_in_another_district(pune_bmo):
         db.close()
     resp = client.post(f"/api/v1/visits/{visit}/resolve-risk", headers=headers,
                        json={"note": "Reaching across a district boundary."})
+    assert resp.status_code == 403
+
+
+def test_a_bmo_cannot_override_a_risk_in_another_district(pune_bmo):
+    """override_risk had its own, older scope check that predates
+    visible_sub_centres and never got the district split -- it let a BMO
+    through with an explicit 'district-wide, no restriction' comment, the
+    exact bug this file exists to catch, just on a different endpoint."""
+    client, headers = pune_bmo
+    db = SessionLocal()
+    try:
+        nashik_asha = db.query(Worker).filter(Worker.phone == NASHIK_ASHA_PHONE).first()
+        patient = _patient_of(db, nashik_asha)
+        visit = db.query(Visit).filter(Visit.patient_id == patient.patient_id).first().visit_id
+    finally:
+        db.close()
+    resp = client.post(f"/api/v1/visits/{visit}/risk-override", headers=headers,
+                       json={"new_risk_level": "LOW", "reason": "Reaching across a district boundary."})
     assert resp.status_code == 403
 
 

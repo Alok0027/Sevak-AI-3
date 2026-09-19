@@ -12,7 +12,7 @@ from app.db.models.action import Action
 from app.db.models.audit_log import AuditLog
 from sqlalchemy.exc import IntegrityError
 
-from app.api.deps import DbSession, get_supervisor_scope, require_roles
+from app.api.deps import DbSession, require_roles, visible_sub_centres
 from app.core.config import get_settings
 from app.db.models.patient import Patient
 from app.db.models.risk_flag import RiskFlag
@@ -222,13 +222,15 @@ def override_risk(
 
     if user.role == "asha" and visit.worker_id != user.worker_id:
         raise HTTPException(status_code=403, detail="Not your visit")
-    if user.role == "anm":
-        scope = get_supervisor_scope(user, db)
+    if user.role in ("anm", "bmo"):
+        # Same scoping as every other supervisor endpoint: an ANM's own
+        # sub-centre, a BMO's whole district -- not, as this used to read,
+        # "BMO: no restriction" from when get_supervisor_scope returned
+        # None for her unconditionally.
+        allowed = visible_sub_centres(user, db)
         worker = db.query(Worker).filter(Worker.worker_id == visit.worker_id).first()
-        if worker is None or worker.sub_centre_id != scope:
-            raise HTTPException(status_code=403, detail="Visit is outside your sub-centre")
-    # BMO: district-wide, no scope restriction (get_supervisor_scope returns
-    # None for bmo everywhere else in the app -- same rule here).
+        if worker is None or worker.sub_centre_id not in allowed:
+            raise HTTPException(status_code=403, detail="Visit is outside your area")
 
     if db.get(RiskResolution, visit_id) is not None:
         raise HTTPException(409, "This visit was resolved; record a new clinical assessment instead of rewriting it")
