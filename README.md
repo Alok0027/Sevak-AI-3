@@ -30,13 +30,13 @@ The API sleeps after 15 minutes idle on Render's free tier. The first
 request wakes it and takes about 50 seconds; everything after that is
 immediate. Open it a minute before you need it.
 
-## Status: backend pipeline is real and tested; mobile/dashboard scaffolded
+## Status
 
 | Component | State |
 |---|---|
-| `backend/` | **Working.** FastAPI + LangGraph 5-agent pipeline, all 7 API endpoints, JWT/RBAC, synthetic data generator, PDF reports, 10 passing tests. Runs fully offline against mocked Bhashini/LLM/WhatsApp -- see `backend/README.md` for the real-vs-mocked breakdown and how to flip on real API keys. |
-| `dashboard/` | **Working.** React + Vite district dashboard (heatmap, metrics, escalations), verified end-to-end against the live backend (screenshot in the delivery notes). `npm install && npm run dev`. |
-| `mobile/` | **Code skeleton.** Every screen and service is written (login, patient list, voice recording + offline queue, task list), but needs `flutter create .` run once to generate the native android/ios folders before it's buildable -- see `mobile/README.md`. |
+| `backend/` | **Working.** FastAPI + LangGraph 5-agent pipeline, JWT/RBAC scoped to the caller's own sub-centre (ANM) or district (BMO) -- not just role -- across the full REST surface: auth, patients, workers, visits, dashboard, escalations, admin, notifications, sync, support tickets, reports. Synthetic data generator, PDF reports (monthly HMIS + an actual RCH register, not just a count). 395 passing tests. Runs fully offline against mocked Bhashini/LLM/WhatsApp -- see `backend/README.md` for the real-vs-mocked breakdown and how to flip on real API keys. |
+| `dashboard/` | **Working.** React + Vite district dashboard for ANM/BMO/Admin. District risk heatmap is village-level (real coordinates where known, honestly flagged as approximate where not), click-through from a village straight to its patient list. Headline metrics, worker roster, escalation queue -- which is read-only triage; resolving a HIGH case happens on that patient's own profile, with a mandatory clinical-review note. Monthly HMIS PDF is downloadable from the worker page. Verified end-to-end against the live backend. `npm install && npm run dev`. |
+| `mobile/` | **Working.** `flutter create .` has been run and committed -- `android/` and `ios/` are real, buildable platform folders, not a to-do. Login, patient list with risk badges, voice-record a home visit, offline queue + auto-sync, follow-up task list, leave/cover, ASHA profile. Not yet exercised on a physical low-end Android device (FR-07.4 target: Android 10+, 2GB RAM) -- see `mobile/README.md`. |
 
 ## Fastest way to see it work
 
@@ -65,7 +65,10 @@ cd dashboard && npm install && cp .env.example .env && npm run dev
 ```
 
 Open http://localhost:5173, sign in as the demo ANM (`9999999901` / `1234`),
-and watch the dashboard reflect whatever visits you run through the backend.
+and watch the dashboard -- including the heatmap, drilling into a village,
+and the escalation queue -- reflect whatever visits you run through the
+backend. Sign in as the BMO (`9999999902`) to see the same views scoped to
+a whole district instead of one sub-centre.
 
 ## Why some things are mocked
 
@@ -86,14 +89,21 @@ deterministic rules.
 backend/    FastAPI + LangGraph -- see backend/README.md
 mobile/     Flutter (ASHA worker app) -- see mobile/README.md
 dashboard/  React (district dashboard) -- see dashboard/README.md
+docs/       EVIDENCE.md (what's measured vs. claimed), RELIABILITY_ROLLOUT.md
 ```
 
 ## Next steps, in SRS sprint-plan order
 
-2. **Week 2**: register for Bhashini + an LLM API key; flip `USE_MOCKS=false`.
-3. **Week 3**: `flutter create .` in `mobile/`, wire `SyncService.start()` after login, test on a real Android 10+/2GB RAM device (FR-07.4).
-4. **Week 3**: WhatsApp Business API approval (apply Week 1 Day 1 per the SRS risk register -- long lead time); Twilio SMS as the documented fallback.
-5. **Week 4**: `python -m scripts.seed_synthetic_data --full` for the full 500-worker/5,000-patient dataset; rehearse the section 9 demo script on the actual demo hardware.
+1. **Week 2**: register for Bhashini + an LLM API key; flip `USE_MOCKS=false`.
+2. **Week 3**: test the mobile app end-to-end on a real Android 10+/2GB RAM
+   device (FR-07.4) -- the platform folders are generated and it builds;
+   what's left is verification on real hardware, not more code.
+3. **Week 3**: WhatsApp Business API approval (apply Week 1 Day 1 per the
+   SRS risk register -- long lead time); Twilio SMS as the documented
+   fallback.
+4. **Week 4**: `python -m scripts.seed_synthetic_data --full` for the full
+   500-worker/5,000-patient dataset; rehearse the section 9 demo script on
+   the actual demo hardware.
 
 ## Deployment
 
@@ -108,7 +118,14 @@ afterwards.
 ### 1. Backend → Render
 
 `render.yaml` is a blueprint: it creates the web service and its Postgres
-together and wires `DATABASE_URL` between them.
+together and wires `DATABASE_URL` between them. It also defines a
+`sevakai-escalation-tick` cron service for the 48-hour escalation check --
+Render Cron Jobs need at least the "starter" plan, which the free web/DB
+services in this blueprint don't require, so it has to be enabled
+separately from the Render dashboard before it actually runs (see
+`docs/RELIABILITY_ROLLOUT.md`). Until then, no scheduler is ticking in
+production; escalation checks still run inline whenever a supervisor loads
+the escalation queue.
 
   Render → New → Blueprint → select this repo.
 
@@ -193,5 +210,11 @@ schema next changes, not after.
 CI does not run the test suite on push. Run it before deploying:
 
 ```bash
-cd backend && PYTHONPATH=. pytest -q     # 98 tests, no network required
+cd backend && python -m pytest -q     # 395 tests, no network required
 ```
+
+`docs/EVIDENCE.md` is worth reading before any presentation claim involving
+numbers (speech accuracy, WhatsApp delivery, latency, concurrent users, or
+cost/impact projections) -- it separates what the current tests actually
+measure from what would still need real data, real devices, or a field
+pilot to support.
