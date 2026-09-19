@@ -820,11 +820,210 @@ table.data td.drivers {
   padding: var(--s4);
 }
 
-.heatmap-card > .heatmap-map {
+.heatmap-card > .heatmap-wrap {
   flex: none;
-  height: 420px;
+}
+
+.heatmap-canvas {
+  position: relative;
+}
+
+.heatmap-map {
+  height: 440px;
   width: 100%;
   border-radius: calc(var(--radius) - 4px);
+  border: 1px solid var(--hairline);
+  z-index: 0; /* keeps Leaflet's panes under the app's own overlays */
+}
+
+/* The three figures the map is answering, in words, above it -- so the
+   section still says something on a laptop screen where the reader never
+   clicks a dot. */
+.heatmap-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1) var(--s4);
+  align-items: baseline;
+  margin-bottom: var(--s3);
+  font-size: 13px;
+  color: var(--slate);
+}
+
+.heatmap-summary strong {
+  color: var(--ink);
+  font-size: 15px;
+  font-family: var(--font-display);
+}
+
+.heatmap-summary .is-high strong {
+  color: var(--risk-high);
+}
+
+.heatmap-summary-worst {
+  margin-left: auto;
+}
+
+/* Legend, over the map's bottom-left corner. Leaflet's own panes sit at
+   z-index 200-700, so this has to clear them to be clickable-through. */
+.heatmap-key {
+  position: absolute;
+  left: var(--s3);
+  bottom: var(--s3);
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: var(--s2) var(--s3);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  font-size: 11.5px;
+  color: var(--slate);
+  pointer-events: none;
+}
+
+.heatmap-key-title {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.heatmap-key-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.heatmap-key i,
+.village-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+  flex: none;
+}
+
+.heatmap-key-note {
+  margin-top: 2px;
+  padding-top: 4px;
+  border-top: 1px solid var(--hairline);
+  font-size: 10.5px;
+}
+
+/* ── The village card inside a map popup ─────────────────────────────── */
+
+/* Leaflet's default popup is a white box with a serif-ish system font and
+   its own padding. Overridden here so a dot opens something that looks
+   like the rest of the product, not like a map widget. */
+.village-popup .leaflet-popup-content-wrapper {
+  border-radius: var(--radius-sm);
+  box-shadow: 0 6px 24px rgba(16, 34, 28, 0.16);
+  border: 1px solid var(--hairline);
+}
+
+.village-popup .leaflet-popup-content {
+  margin: var(--s3);
+  font-family: inherit;
+  line-height: 1.45;
+}
+
+.village-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.village-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  font-family: var(--font-display);
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.village-split {
+  display: flex;
+  height: 8px;
+  border-radius: var(--pill);
+  overflow: hidden;
+  background: var(--sage);
+}
+
+.village-split-seg {
+  height: 100%;
+}
+
+.village-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1) var(--s3);
+  font-size: 11.5px;
+  color: var(--slate);
+}
+
+.village-legend span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.village-facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--s2);
+  padding-top: var(--s2);
+  border-top: 1px solid var(--hairline);
+}
+
+.village-facts div {
+  display: flex;
+  flex-direction: column;
+}
+
+.village-facts dt {
+  font-size: 10.5px;
+  color: var(--slate);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.village-facts dd {
+  margin: 0;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.village-approx {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--risk-medium);
+}
+
+.village-cta {
+  width: 100%;
+  margin-top: 2px;
+}
+
+.tooltip-hint {
+  color: var(--slate);
+  font-size: 10.5px;
+}
+
+@media (max-width: 720px) {
+  .heatmap-map {
+    height: 320px;
+  }
+
+  .heatmap-summary-worst {
+    margin-left: 0;
+  }
+
+  .heatmap-key {
+    display: none; /* a 320px-tall map has no corner to spare */
+  }
 }
 
 .heatmap-loading {

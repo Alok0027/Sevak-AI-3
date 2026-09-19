@@ -4,7 +4,6 @@ Every number below is a real query result -- no placeholder or randomly
 generated figures. ANM callers are automatically scoped to their own
 sub_centre_id (SRS table 4); BMO/Admin see the whole district.
 """
-import hashlib
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
@@ -29,22 +28,14 @@ from app.schemas.dashboard import (
     WorkerFollowupCompliance,
     WorkerLeaderboardEntry,
 )
-from app.services import followup_schedule
+from app.services import followup_schedule, geo
 
 router = APIRouter(prefix="/api/v1/dashboard", tags=["dashboard"])
 
-_MH_LAT_RANGE = (17.5, 21.5)
-_MH_LNG_RANGE = (73.0, 76.5)
 TREND_WINDOW_DAYS = 14
 
-
-def _village_to_latlng(village: str) -> tuple[float, float]:
-    digest = hashlib.sha256(village.encode()).hexdigest()
-    frac_lat = int(digest[:8], 16) / 0xFFFFFFFF
-    frac_lng = int(digest[8:16], 16) / 0xFFFFFFFF
-    lat = _MH_LAT_RANGE[0] + frac_lat * (_MH_LAT_RANGE[1] - _MH_LAT_RANGE[0])
-    lng = _MH_LNG_RANGE[0] + frac_lng * (_MH_LNG_RANGE[1] - _MH_LNG_RANGE[0])
-    return round(lat, 5), round(lng, 5)
+# Ranked worst-first: the map's colour, and the order the legend reads in.
+_RISK_ORDER = ("HIGH", "MEDIUM", "LOW")
 
 
 def _due_sort(due_at: datetime | None) -> datetime:
@@ -71,24 +62,71 @@ def heatmap(
     district_id: str | None = Query(default=None),
     date_range: str | None = Query(default=None),
 ) -> HeatmapResponse:
+    """One point per village: how many patients, how they currently split
+    across HIGH/MEDIUM/LOW, and when the village was last visited.
+
+    The split is by each patient's most recent classified visit, so the
+    three counts sum to patient_count and describe the village as it
+    stands today -- a woman flagged HIGH in March and cleared in April
+    counts once, as LOW. Counting every visit instead (which is what this
+    endpoint used to do, while calling the result `patient_count`) made a
+    frequently-visited village look like a dangerous one.
+
+    ponytail: aggregation happens in Python over the scoped visit rows
+    rather than in SQL, matching the rest of this module. That is fine
+    for a district pilot (tens of thousands of rows at most); the upgrade
+    path if a state-wide deployment ever needs it is a GROUP BY with a
+    window function for the per-patient latest visit.
+    """
     scope = get_supervisor_scope(user, db)
     rows = (
         _scoped_visits(db, scope)
         .join(Patient, Visit.patient_id == Patient.patient_id)
         .filter(Visit.risk_level.isnot(None))
-        .with_entities(Patient.village, Visit.risk_level)
+        .with_entities(Patient.village, Visit.patient_id, Visit.risk_level, Visit.created_at)
         .all()
     )
-    buckets: dict[tuple[str, str], int] = {}
-    for village, risk_level in rows:
-        key = (village or "Unknown", risk_level)
-        buckets[key] = buckets.get(key, 0) + 1
+
+    villages: dict[str, dict] = {}
+    for village, patient_id, risk_level, created_at in rows:
+        name = village or "Unknown"
+        when = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+        entry = villages.setdefault(name, {"visits": 0, "last_visit_at": None, "latest": {}})
+        entry["visits"] += 1
+        if entry["last_visit_at"] is None or when > entry["last_visit_at"]:
+            entry["last_visit_at"] = when
+        seen = entry["latest"].get(patient_id)
+        if seen is None or when > seen[0]:
+            entry["latest"][patient_id] = (when, risk_level)
 
     points = []
-    for (village, risk_level), count in buckets.items():
-        lat, lng = _village_to_latlng(village)
-        points.append(RiskPoint(lat=lat, lng=lng, risk_level=risk_level, patient_count=count, village=village))
+    for name, entry in villages.items():
+        levels = [level for _, level in entry["latest"].values()]
+        counts = {level: levels.count(level) for level in _RISK_ORDER}
+        lat, lng, approximate = geo.locate(name)
+        points.append(
+            RiskPoint(
+                lat=lat,
+                lng=lng,
+                village=name,
+                approximate_location=approximate,
+                # Worst level still open here. Anything the classifier
+                # couldn't score (UNASSESSED) is carried in patient_count
+                # but never colours the dot -- it isn't a severity.
+                risk_level=next((lvl for lvl in _RISK_ORDER if counts[lvl]), "LOW"),
+                patient_count=len(entry["latest"]),
+                visit_count=entry["visits"],
+                high_count=counts["HIGH"],
+                medium_count=counts["MEDIUM"],
+                low_count=counts["LOW"],
+                last_visit_at=entry["last_visit_at"],
+            )
+        )
 
+    # Worst first, then biggest: the order the dashboard draws them in, so
+    # a HIGH village's dot lands on top of its quieter neighbours rather
+    # than under them.
+    points.sort(key=lambda p: (_RISK_ORDER.index(p.risk_level), -p.patient_count))
     return HeatmapResponse(risk_points=points)
 
 

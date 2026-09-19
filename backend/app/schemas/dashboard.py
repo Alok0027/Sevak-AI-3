@@ -64,11 +64,35 @@ class FollowupComplianceResponse(BaseModel):
 
 
 class RiskPoint(BaseModel):
+    """One village on the district heatmap.
+
+    This used to be one row per (village, risk_level) pair, which drew
+    two or three dots on top of each other at the same coordinate: the
+    HIGH one covered the others, so a village with 1 HIGH and 40 LOW
+    looked exactly like a village with 1 HIGH and nothing else. One row
+    per village with the split carried alongside is what a supervisor is
+    actually reading the map for.
+
+    The three counts are patients, not visits, and they are split by each
+    patient's *latest* visit -- so they sum to patient_count and answer
+    "how many women here are HIGH risk right now", not "how many HIGH
+    readings has this village ever produced".
+    """
+
     lat: float
     lng: float
-    risk_level: str
+    risk_level: str  # worst level currently open in the village
     patient_count: int
     village: str | None = None
+    visit_count: int = 0
+    high_count: int = 0
+    medium_count: int = 0
+    low_count: int = 0
+    last_visit_at: datetime | None = None
+    # False only for a village in the gazetteer (app/services/geo.py). A
+    # placeholder position is labelled as one on the map rather than
+    # passed off as a survey coordinate.
+    approximate_location: bool = False
 
 
 class HeatmapResponse(BaseModel):

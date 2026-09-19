@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { fetchAllPatients } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { useSortableData } from "../hooks/useSortableData";
@@ -46,6 +46,19 @@ export default function PatientsPage() {
   const [registeredAfter, setRegisteredAfter] = useState("");
   const [registeredBefore, setRegisteredBefore] = useState("");
 
+  // The heatmap's drill-down lands here: clicking a village on the map
+  // opens that village's caseload rather than the whole district, which
+  // is the only reason a dot on a map beats a row in a table. Read from
+  // the URL so the filtered view is a link a supervisor can send someone.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const villageFilter = searchParams.get("village") || "all";
+  const setVillageFilter = (value) => {
+    const next = new URLSearchParams(searchParams);
+    if (value && value !== "all") next.set("village", value);
+    else next.delete("village");
+    setSearchParams(next, { replace: true });
+  };
+
   useEffect(() => {
     fetchAllPatients()
       .then((data) => {
@@ -61,6 +74,7 @@ export default function PatientsPage() {
   const filtered = useMemo(() => {
     return patients.filter((p) => {
       if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false;
+      if (villageFilter !== "all" && (p.village || "Unknown") !== villageFilter) return false;
       if (genderFilter !== "all" && (p.gender || "").toLowerCase() !== genderFilter) return false;
       if (riskFilter === "unrecorded" && p.risk_status) return false;
       if (riskFilter === "attention" && !p.needs_attention) return false;
@@ -70,7 +84,15 @@ export default function PatientsPage() {
       if (registeredBefore && new Date(p.registered_at) > new Date(`${registeredBefore}T23:59:59`)) return false;
       return true;
     });
-  }, [patients, search, genderFilter, riskFilter, registeredAfter, registeredBefore]);
+  }, [patients, search, villageFilter, genderFilter, riskFilter, registeredAfter, registeredBefore]);
+
+  // Only villages that actually have patients in scope -- a dropdown of
+  // every village in the district, most of them empty, is a longer list
+  // that answers fewer questions.
+  const villages = useMemo(
+    () => [...new Set(patients.map((p) => p.village || "Unknown"))].sort((a, b) => a.localeCompare(b)),
+    [patients],
+  );
 
   // null, not "registered_at": the list arrives from the server already in
   // triage order (backend/app/services/patient_priority.py), and the hook
@@ -117,6 +139,14 @@ export default function PatientsPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        <select value={villageFilter} onChange={(e) => setVillageFilter(e.target.value)}>
+          <option value="all">All villages</option>
+          {villages.map((v) => (
+            <option key={v} value={v}>
+              {v}
+            </option>
+          ))}
+        </select>
         <select value={genderFilter} onChange={(e) => setGenderFilter(e.target.value)}>
           <option value="all">All genders</option>
           <option value="female">Female</option>
