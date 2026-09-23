@@ -158,3 +158,60 @@ class ReassignResult(BaseModel):
     from_worker_id: str
     to_worker_id: str
     to_worker_name: str
+
+
+class PatientUpdate(BaseModel):
+    """A correction to an already-registered patient (PATCH /patients/{id}).
+
+    PatientCreate promises that everything except the name "can be filled
+    in or corrected later". Until this existed there was no endpoint that
+    could do it: a name Bhashini misheard at registration followed the
+    woman through every referral letter and every WhatsApp message for the
+    life of the record.
+
+    Every field is optional and only the ones actually sent are written,
+    so a client correcting an age cannot blank a phone number it did not
+    know about. `None` therefore means "leave alone" rather than "clear";
+    clearing pregnancy_stage -- the one field that legitimately goes from
+    a value back to nothing, when a pregnancy ends -- has its own explicit
+    flag below.
+    """
+
+    name: str | None = Field(default=None, min_length=1)
+    age: int | None = Field(default=None, ge=0, le=120)
+    gender: str | None = None
+    village: str | None = None
+    phone: str | None = None
+    pregnancy_stage: str | None = None
+    rch_number: str | None = None
+    bp_systolic: int | None = None
+    bp_diastolic: int | None = None
+    blood_sugar_fasting: int | None = None
+    blood_sugar_random: int | None = None
+
+    clear_pregnancy_stage: bool = False
+
+    # Why the record was wrong. Required for the same reason a risk
+    # override requires one: a correction with no stated reason is
+    # indistinguishable from tampering when somebody reads the audit log
+    # back six months later.
+    reason: str = Field(min_length=5, max_length=500)
+
+
+class PatientStatusChange(BaseModel):
+    """Close a patient's line in the register, or reopen it.
+
+    "moved" and "deceased" are the two real-world endings a caseload has
+    to be able to record. "inactive" covers the rest (lost to follow-up,
+    declined further visits). "active" reopens a line closed by mistake.
+    """
+
+    status: str = Field(pattern="^(active|moved|deceased|inactive)$")
+    reason: str = Field(min_length=5, max_length=500)
+
+
+class PatientStatusResult(BaseModel):
+    patient_id: str
+    status: str
+    closed_at: datetime | None
+    followups_cancelled: int

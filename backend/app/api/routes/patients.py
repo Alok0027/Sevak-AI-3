@@ -6,7 +6,7 @@ the database hands back -- see app/services/patient_priority.py for why
 order carries more of the signal here than colour does.
 """
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
@@ -31,7 +31,10 @@ from app.schemas.patient import (
     PatientDirectoryEntry,
     PatientDirectoryResponse,
     PatientListResponse,
+    PatientStatusChange,
+    PatientStatusResult,
     PatientSummary,
+    PatientUpdate,
     PatientVoiceIntakeRequest,
     PatientVoiceIntakeResponse,
     ReassignRequest,
@@ -41,6 +44,7 @@ from app.schemas.worker import PatientHistoryEntry, PatientHistoryResponse
 from app.services import cover, identity, patient_intake, patient_priority
 from app.services.llm_client import get_llm_client
 from app.services.audit import record as audit_record
+from app.services.audit import record_read as audit_read
 from app.services.bhashini_client import get_bhashini_client
 
 # Aliased because a patient's assigned worker and the worker who overrode a
@@ -251,12 +255,24 @@ def _reject_duplicates(db, *, rch: str | None, phone_hash: str | None, sub_centr
 @router.get("", response_model=PatientDirectoryResponse)
 def list_all_patients(
     db: DbSession,
-    user=Depends(require_roles("anm", "bmo", "admin")),
-    sub_centre_id: str | None = Query(default=None, description="BMO/Admin only: filter to one sub-centre"),
+    # No "admin" here, deliberately. SRS table 4 gives the Admin role
+    # worker onboarding, protocol configuration and user management, and
+    # *no patient record access* -- the role administers the system, not
+    # the care. It kept that access for a long time because the role list
+    # was written once and copied to each new endpoint; a system
+    # administrator who can read every pregnant woman's clinical history
+    # in the state is a standing DPDP exposure with no operational reason
+    # behind it.
+    #
+    # What an admin keeps: the aggregate dashboard (counts and village
+    # totals, no identities), the worker roster, caseload reassignment
+    # (which returns counts and worker names only), and the audit log.
+    user=Depends(require_roles("anm", "bmo")),
+    sub_centre_id: str | None = Query(default=None, description="BMO only: filter to one sub-centre"),
 ) -> PatientDirectoryResponse:
     """FR-08 drill-down: 'which patients are my ASHA workers actually
     treating right now' -- every patient across the ANM's own sub-centre,
-    or (BMO/Admin) the whole district, in one place. The per-worker
+    or (BMO) the whole district, in one place. The per-worker
     GET /patients/{worker_id} above can't answer that; it only ever shows
     one ASHA's patients at a time, so a supervisor would have to open every
     worker one by one to see who's being treated. The dashboard's Patients
@@ -268,7 +284,10 @@ def list_all_patients(
     rows = (
         db.query(Patient, Worker)
         .join(Worker, Patient.worker_id == Worker.worker_id)
-        .filter(Worker.role == "asha")
+        # A closed line is not a caseload entry any more. Her visits stay
+        # in every historical figure -- what she leaves is the list of
+        # people someone is expected to go and see.
+        .filter(Worker.role == "asha", Patient.status == "active")
     )
     if allowed is not None:
         rows = rows.filter(Worker.sub_centre_id.in_(allowed))
@@ -360,9 +379,21 @@ def list_all_patients(
 def list_patients(
     worker_id: str,
     db: DbSession,
-    _user=Depends(require_roles("asha", "anm", "bmo", "admin")),
+    # No "admin" here, deliberately. SRS table 4 gives the Admin role
+    # worker onboarding, protocol configuration and user management, and
+    # *no patient record access* -- the role administers the system, not
+    # the care. It kept that access for a long time because the role list
+    # was written once and copied to each new endpoint; a system
+    # administrator who can read every pregnant woman's clinical history
+    # in the state is a standing DPDP exposure with no operational reason
+    # behind it.
+    #
+    # What an admin keeps: the aggregate dashboard (counts and village
+    # totals, no identities), the worker roster, caseload reassignment
+    # (which returns counts and worker names only), and the audit log.
+    user=Depends(require_roles("asha", "anm", "bmo")),
 ) -> PatientListResponse:
-    require_worker_access(_user, db, worker_id)
+    require_worker_access(user, db, worker_id)
     # Her own patients, plus anyone she is standing in for today.
     #
     # Cover is the reason this is not a single equality any more. An ASHA
@@ -379,7 +410,11 @@ def list_patients(
         else {}
     )
 
-    patients = db.query(Patient).filter(Patient.worker_id.in_(visible)).all()
+    patients = (
+        db.query(Patient)
+        .filter(Patient.worker_id.in_(visible), Patient.status == "active")
+        .all()
+    )
     visit_counts = dict(
         db.query(Visit.patient_id, func.count(Visit.visit_id))
         .filter(Visit.patient_id.in_([p.patient_id for p in patients]))
@@ -430,6 +465,7 @@ def list_patients(
     # refreshes, and a list that reorders under an ASHA's thumb is a list
     # she stops trusting.
     summaries.sort(key=lambda s: (-s.priority_score, s.name.lower()))
+    audit_read(db, user.worker_id, worker_id, "patient", count=len(summaries))
     return PatientListResponse(
         patients=summaries,
         attention_count=sum(1 for s in summaries if s.needs_attention),
@@ -440,7 +476,19 @@ def list_patients(
 def patient_history(
     patient_id: str,
     db: DbSession,
-    user=Depends(require_roles("asha", "anm", "bmo", "admin")),
+    # No "admin" here, deliberately. SRS table 4 gives the Admin role
+    # worker onboarding, protocol configuration and user management, and
+    # *no patient record access* -- the role administers the system, not
+    # the care. It kept that access for a long time because the role list
+    # was written once and copied to each new endpoint; a system
+    # administrator who can read every pregnant woman's clinical history
+    # in the state is a standing DPDP exposure with no operational reason
+    # behind it.
+    #
+    # What an admin keeps: the aggregate dashboard (counts and village
+    # totals, no identities), the worker roster, caseload reassignment
+    # (which returns counts and worker names only), and the audit log.
+    user=Depends(require_roles("asha", "anm", "bmo")),
 ) -> PatientHistoryResponse:
     patient = db.query(Patient).filter(Patient.patient_id == patient_id).first()
     if patient is None:
@@ -610,7 +658,11 @@ def reassign_caseload(
     if user.role != "admin" and from_worker.sub_centre_id != me.sub_centre_id:
         raise HTTPException(status_code=403, detail="That worker is outside your sub-centre")
 
-    patients = db.query(Patient).filter(Patient.worker_id == from_worker_id).all()
+    patients = (
+        db.query(Patient)
+        .filter(Patient.worker_id == from_worker_id, Patient.status == "active")
+        .all()
+    )
     for patient in patients:
         patient.worker_id = to_worker.worker_id
     db.commit()
@@ -638,4 +690,196 @@ def reassign_caseload(
         from_worker_id=from_worker_id,
         to_worker_id=to_worker.worker_id,
         to_worker_name=to_worker.name,
+    )
+
+
+def _writable_patient(db, user, patient_id: str) -> Patient:
+    """The patient, if this caller may correct her record.
+
+    Deliberately narrower than who may *read* it. An ASHA may correct her
+    own patients (including anyone she is covering for), and an ANM may
+    correct anyone in her sub-centre, because those two are the people
+    who actually meet the woman and can check the spelling of her name.
+
+    A BMO may not, even though she can read every record in the district:
+    SRS table 4 gives her "read-only access to patient data", and a
+    district officer editing a demographic detail she has no way to verify
+    is not a correction, it is a guess overwriting the only person who
+    knows. Admin may not either, for the same reason plus the one in
+    deps.visible_sub_centres -- the admin role administers the system, not
+    a place.
+    """
+    patient = db.query(Patient).filter(Patient.patient_id == patient_id).first()
+    if patient is None:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    if user.role == "asha":
+        if patient.worker_id not in cover.visible_worker_ids(db, user.worker_id):
+            raise HTTPException(status_code=403, detail="Not your patient")
+        return patient
+
+    # ANM: her own sub-centre only.
+    allowed = visible_sub_centres(user, db)
+    if allowed is not None and patient.sub_centre_id not in allowed:
+        raise HTTPException(status_code=403, detail="Patient is outside your area")
+    return patient
+
+
+@router.patch("/{patient_id}", response_model=PatientSummary)
+def correct_patient(
+    patient_id: str,
+    payload: PatientUpdate,
+    db: DbSession,
+    user=Depends(require_roles("asha", "anm")),
+) -> PatientSummary:
+    """Correct a registered patient's details.
+
+    Only the fields actually present in the request body are written --
+    `exclude_unset`, not `exclude_none` -- so a client that knows about an
+    age and nothing else cannot blank the phone number it never sent.
+
+    The audit entry records the old and new value of every field that
+    changed, which is the point of the endpoint as much as the correction
+    is: "her name used to be something else" is exactly the kind of edit
+    that has to be reconstructable later.
+    """
+    patient = _writable_patient(db, user, patient_id)
+
+    fields = payload.model_dump(exclude_unset=True, exclude={"reason", "clear_pregnancy_stage"})
+    changes: dict[str, dict] = {}
+
+    for field, new_value in fields.items():
+        if new_value is None:
+            continue  # "not sent" and "sent as null" both mean leave alone
+        old_value = getattr(patient, field)
+        if old_value == new_value:
+            continue
+        setattr(patient, field, new_value)
+        # The audit log is readable by anyone with the admin console, so it
+        # records that a field changed and not what it changed to for the
+        # two fields that are encrypted at rest. Logging the old name in
+        # clear would undo the encryption on the row it describes.
+        if field in ("name", "phone"):
+            changes[field] = {"changed": True}
+        else:
+            changes[field] = {"from": old_value, "to": new_value}
+
+    if payload.clear_pregnancy_stage and patient.pregnancy_stage is not None:
+        changes["pregnancy_stage"] = {"from": patient.pregnancy_stage, "to": None}
+        patient.pregnancy_stage = None
+
+    # Keep the derived lookup keys in step with the values they index, or
+    # a corrected village stops matching the heatmap's grouping and a
+    # corrected phone stops matching the duplicate check.
+    if "village" in changes:
+        patient.village_code = identity.village_code(patient.village)
+    if "phone" in changes:
+        patient.phone_hash = identity.phone_index(patient.phone)
+
+    if not changes:
+        raise HTTPException(status_code=400, detail="Nothing to correct -- no field differs")
+
+    db.commit()
+    db.refresh(patient)
+
+    audit_record(
+        db,
+        user_id=user.worker_id,
+        action_type="patient.correct",
+        record_id=patient_id,
+        record_type="patient",
+        details={"reason": payload.reason, "changed": changes, "by_role": user.role},
+    )
+
+    visits = db.query(Visit).filter(Visit.patient_id == patient_id).order_by(Visit.created_at.desc()).all()
+    return PatientSummary(
+        id=patient.patient_id,
+        name=patient.name,
+        age=patient.age,
+        village=patient.village,
+        pregnancy_stage=patient.pregnancy_stage,
+        rch_number=patient.rch_number,
+        risk_status=visits[0].risk_level if visits else None,
+        last_visit=visits[0].created_at if visits else None,
+        total_visits=len(visits),
+    )
+
+
+@router.post("/{patient_id}/status", response_model=PatientStatusResult)
+def change_patient_status(
+    patient_id: str,
+    payload: PatientStatusChange,
+    db: DbSession,
+    user=Depends(require_roles("asha", "anm")),
+) -> PatientStatusResult:
+    """Close a patient's line in the register, or reopen one closed by mistake.
+
+    Closing cancels her pending follow-up tasks, which is the whole point:
+    a woman who has moved away or died cannot be visited, and until this
+    existed her follow-up sat permanently overdue, counting against her
+    ASHA's compliance and against the sub-centre's figures, with no way to
+    clear it except to pretend the visit happened.
+
+    What closing does not do is remove anything. Her visits, risk flags
+    and the reports built from them are the record of care actually given;
+    a district's historical figures must not move because somebody changed
+    address. Reopening restores her to the caseload but does not revive
+    the cancelled tasks -- if she is back, the next visit creates the next
+    follow-up.
+    """
+    patient = _writable_patient(db, user, patient_id)
+
+    if patient.status == payload.status:
+        raise HTTPException(status_code=400, detail=f"Patient is already {payload.status}")
+
+    previous = patient.status
+    now = datetime.now(timezone.utc)
+    patient.status = payload.status
+
+    cancelled = 0
+    if payload.status == "active":
+        patient.closed_reason = None
+        patient.closed_at = None
+        patient.closed_by = None
+    else:
+        patient.closed_reason = payload.reason
+        patient.closed_at = now
+        patient.closed_by = user.worker_id
+        cancelled = (
+            db.query(Action)
+            .filter(
+                Action.action_id.in_(
+                    db.query(Action.action_id)
+                    .join(Visit, Action.visit_id == Visit.visit_id)
+                    .filter(
+                        Visit.patient_id == patient_id,
+                        Action.type == "followup",
+                        Action.status == "pending",
+                    )
+                )
+            )
+            .update({Action.status: "cancelled"}, synchronize_session=False)
+        )
+
+    db.commit()
+
+    audit_record(
+        db,
+        user_id=user.worker_id,
+        action_type="patient.status",
+        record_id=patient_id,
+        record_type="patient",
+        details={
+            "from": previous,
+            "to": payload.status,
+            "reason": payload.reason,
+            "followups_cancelled": cancelled,
+            "by_role": user.role,
+        },
+    )
+    return PatientStatusResult(
+        patient_id=patient_id,
+        status=patient.status,
+        closed_at=patient.closed_at,
+        followups_cancelled=cancelled,
     )

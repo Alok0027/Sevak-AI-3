@@ -1,6 +1,7 @@
 """POST /api/v1/visits/transcribe (FR-01.4: transcribe-only, for review
 before processing), POST /api/v1/visits/voice (the core end-to-end pipeline
 endpoint), and POST /api/v1/visits/{visit_id}/risk-override (FR-03.3)."""
+import json
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,16 +20,20 @@ from app.db.models.risk_flag import RiskFlag
 from app.db.models.visit import Visit
 from app.db.models.worker import Worker
 from app.agents import agent1_voice_comprehension as agent1
+from app.agents.agent2_risk_classification import classify
 from app.agents.agent3_action_generation import DEFAULT_PHC, FOLLOWUP_DAYS, build_referral_letter
 from app.services.identity import phc_name as resolve_phc_name
 from app.agents.agent5_escalation import ALERT_ACTION_TYPES
 from app.schemas.visit import (
+    ExtractedFields,
     ExtractRequest,
     ExtractResponse,
     RiskOverrideRequest,
     RiskOverrideResponse,
     TranscribeRequest,
     TranscribeResponse,
+    VisitAmendRequest,
+    VisitAmendResponse,
     VoiceVisitRequest,
     VoiceVisitResponse,
 )
@@ -254,51 +259,10 @@ def override_risk(
     risk_flag.overridden_by = user.worker_id
     risk_flag.override_reason = payload.reason
 
-    # Follow-up deadline: recomputed for the new tier, anchored to the
-    # visit itself so a late override doesn't hand out a fresh 48 hours.
-    followup = (
-        db.query(Action)
-        .filter(Action.visit_id == visit_id, Action.type == "followup", Action.status == "pending")
-        .first()
+    _cascade_risk_change(
+        db, visit, previous_level, payload.new_risk_level,
+        reason_text=f"{payload.reason} (set by {user.role} override)",
     )
-    if followup is not None:
-        due_days = FOLLOWUP_DAYS.get(payload.new_risk_level, 30)
-        followup.due_at = visit.created_at + timedelta(days=due_days)
-
-    if previous_level == "HIGH" and payload.new_risk_level != "HIGH":
-        _cancel_pending_escalations(db, visit_id)
-        referral = (
-            db.query(Action)
-            .filter(Action.visit_id == visit_id, Action.type == "referral", Action.status == "draft")
-            .first()
-        )
-        if referral is not None:
-            referral.status = "cancelled"
-
-    if previous_level != "HIGH" and payload.new_risk_level == "HIGH":
-        has_referral = (
-            db.query(Action)
-            .filter(Action.visit_id == visit_id, Action.type == "referral", Action.status != "cancelled")
-            .first()
-        )
-        if has_referral is None:
-            patient = db.get(Patient, visit.patient_id)
-            # FR-04.1: the patient's own sub-centre's PHC, matching the
-            # voice pipeline's referral letters -- this path used to
-            # hardcode DEFAULT_PHC regardless of who the patient was.
-            resolved_phc = resolve_phc_name(patient.sub_centre_id) if patient else DEFAULT_PHC
-            reason_text = f"{payload.reason} (set by {user.role} override)"
-            referral_text = build_referral_letter(
-                resolved_phc,
-                patient.name if patient else "Unknown",
-                reason_text,
-                # language_code isn't persisted on Visit (see its model),
-                # so this path can't know what language the original
-                # voice visit was recorded in; "hi" matches the pipeline's
-                # own default and the SRS demo script's language.
-                show_clinical_fields=False,
-            )
-            db.add(Action(visit_id=visit_id, type="referral", content=referral_text, status="draft"))
 
     db.commit()
 
@@ -327,4 +291,211 @@ def override_risk(
         overridden_by_name=overriding_worker.name if overriding_worker else "Unknown",
         overridden_by_role=user.role,
         overridden_at=now,
+    )
+
+
+def _cascade_risk_change(
+    db, visit, previous_level: str | None, new_level: str, *, reason_text: str
+) -> None:
+    """Everything downstream of a visit's risk level changing.
+
+    A risk level is not just a label: it sets the follow-up deadline, it
+    decides whether a referral letter exists, and it decides whether a
+    supervisor is paged. Shared by the supervisor override (FR-03.3) and
+    by a correction to the readings themselves, because both change the
+    same thing and either one leaving the cascade half-applied produces a
+    visit whose badge and whose paperwork disagree.
+    """
+    visit_id = visit.visit_id
+
+    # Follow-up deadline: recomputed for the new tier, anchored to the
+    # visit itself so a late change doesn't hand out a fresh 48 hours.
+    followup = (
+        db.query(Action)
+        .filter(Action.visit_id == visit_id, Action.type == "followup", Action.status == "pending")
+        .first()
+    )
+    if followup is not None:
+        due_days = FOLLOWUP_DAYS.get(new_level, 30)
+        followup.due_at = visit.created_at + timedelta(days=due_days)
+
+    if previous_level == "HIGH" and new_level != "HIGH":
+        _cancel_pending_escalations(db, visit_id)
+        referral = (
+            db.query(Action)
+            .filter(Action.visit_id == visit_id, Action.type == "referral", Action.status == "draft")
+            .first()
+        )
+        if referral is not None:
+            referral.status = "cancelled"
+
+    if previous_level != "HIGH" and new_level == "HIGH":
+        has_referral = (
+            db.query(Action)
+            .filter(Action.visit_id == visit_id, Action.type == "referral", Action.status != "cancelled")
+            .first()
+        )
+        if has_referral is None:
+            patient = db.get(Patient, visit.patient_id)
+            # FR-04.1: the patient's own sub-centre's PHC, matching the
+            # voice pipeline's referral letters -- this path used to
+            # hardcode DEFAULT_PHC regardless of who the patient was.
+            resolved_phc = resolve_phc_name(patient.sub_centre_id) if patient else DEFAULT_PHC
+            referral_text = build_referral_letter(
+                resolved_phc,
+                patient.name if patient else "Unknown",
+                reason_text,
+                # language_code isn't persisted on Visit (see its model),
+                # so this path can't know what language the original
+                # voice visit was recorded in; "hi" matches the pipeline's
+                # own default and the SRS demo script's language.
+                show_clinical_fields=False,
+            )
+            db.add(Action(visit_id=visit_id, type="referral", content=referral_text, status="draft"))
+
+
+# Which amendable field each `clear_*` flag blanks. Kept as data rather
+# than a chain of ifs so adding a field is one line in one place.
+_CLEAR_FLAGS = {
+    "clear_bp": ("bp_systolic", "bp_diastolic"),
+    "clear_temperature": ("temperature_c",),
+    "clear_blood_sugar": ("blood_sugar_fasting", "blood_sugar_random"),
+    "clear_pregnancy_stage": ("pregnancy_stage",),
+}
+
+
+@router.patch("/{visit_id}/record", response_model=VisitAmendResponse)
+def amend_visit_record(
+    visit_id: str,
+    payload: VisitAmendRequest,
+    db: DbSession,
+    user=Depends(require_roles("asha", "anm")),
+) -> VisitAmendResponse:
+    """Correct the readings on a recorded visit and re-run the assessment.
+
+    The distinction from `risk-override` is the point of having both.
+    An override says "the system read this correctly and I disagree with
+    its conclusion". An amendment says "the system read this wrongly" --
+    so the readings change and the conclusion is recomputed from them by
+    the same classifier a live visit uses, rather than being typed in.
+
+    A BMO is deliberately excluded even though she may override a risk
+    level: overriding is a clinical judgement she is qualified to make
+    from the district office, and amending a measurement is a claim about
+    what a cuff showed in a house she was not in.
+
+    **An amendment supersedes an existing override.** The override was a
+    judgement about the old readings; once those change it no longer
+    describes what is on the record, so it is cleared and the audit entry
+    says it was. The supervisor can override again on the new numbers.
+
+    The transcript is never rewritten. It is what was actually said, and
+    editing it would destroy the only evidence of what the amendment
+    departed from -- `structured_json` is the interpretation, and that is
+    what this corrects.
+    """
+    visit = db.query(Visit).filter(Visit.visit_id == visit_id).first()
+    if visit is None:
+        raise HTTPException(status_code=404, detail="Visit not found")
+
+    if user.role == "asha":
+        if visit.worker_id not in cover.visible_worker_ids(db, user.worker_id):
+            raise HTTPException(status_code=403, detail="Not your visit")
+    else:
+        allowed = visible_sub_centres(user, db)
+        worker = db.query(Worker).filter(Worker.worker_id == visit.worker_id).first()
+        if worker is None or (allowed is not None and worker.sub_centre_id not in allowed):
+            raise HTTPException(status_code=403, detail="Visit is outside your area")
+
+    if db.get(RiskResolution, visit_id) is not None:
+        raise HTTPException(
+            409,
+            "This visit was resolved; record a new clinical assessment instead of rewriting it",
+        )
+
+    try:
+        current = ExtractedFields.model_validate_json(visit.structured_json or "{}")
+    except ValueError:
+        raise HTTPException(500, "Visit has no readable structured record to amend")
+
+    amended: dict[str, dict] = {}
+    sent = payload.model_dump(exclude_unset=True, exclude=set(_CLEAR_FLAGS) | {"reason"})
+    for field, new_value in sent.items():
+        if new_value is None:
+            continue
+        old_value = getattr(current, field, None)
+        if old_value == new_value:
+            continue
+        setattr(current, field, new_value)
+        amended[field] = {"from": old_value, "to": new_value}
+
+    for flag, fields in _CLEAR_FLAGS.items():
+        if not getattr(payload, flag):
+            continue
+        for field in fields:
+            old_value = getattr(current, field, None)
+            if old_value is None:
+                continue
+            setattr(current, field, None)
+            amended[field] = {"from": old_value, "to": None}
+
+    if not amended:
+        raise HTTPException(status_code=400, detail="Nothing to amend -- no reading differs")
+
+    # Re-run Agent 2 over the corrected record. Same classifier, same
+    # thresholds, same corpus as a live visit -- an amended visit must not
+    # be assessed by a different rule than the one it was first assessed by.
+    result = classify(current)
+
+    previous_level = visit.risk_level
+    now = datetime.now(timezone.utc)
+
+    visit.structured_json = current.model_dump_json()
+    visit.risk_level = result.risk_level
+    visit.risk_score = result.risk_score
+
+    risk_flag = db.query(RiskFlag).filter(RiskFlag.visit_id == visit_id).first()
+    override_cleared = False
+    if risk_flag is not None:
+        risk_flag.risk_level = result.risk_level
+        risk_flag.drivers_json = json.dumps([d.model_dump() for d in result.drivers])
+        if risk_flag.overridden_by is not None:
+            override_cleared = True
+            risk_flag.overridden_by = None
+            risk_flag.override_reason = None
+
+    _cascade_risk_change(
+        db, visit, previous_level, result.risk_level,
+        reason_text=f"{payload.reason} (readings amended by {user.role})",
+    )
+
+    db.commit()
+
+    audit_record(
+        db,
+        user_id=user.worker_id,
+        action_type="visit.amend",
+        record_id=visit_id,
+        record_type="visit",
+        details={
+            "reason": payload.reason,
+            "amended": amended,
+            "previous_risk_level": previous_level,
+            "new_risk_level": result.risk_level,
+            "override_cleared": override_cleared,
+            "by_role": user.role,
+        },
+    )
+
+    return VisitAmendResponse(
+        visit_id=visit_id,
+        patient_id=visit.patient_id,
+        amended_fields=amended,
+        previous_risk_level=previous_level,
+        new_risk_level=result.risk_level,
+        risk_score=result.risk_score,
+        risk_drivers=result.drivers,
+        override_cleared=override_cleared,
+        amended_by=user.worker_id,
+        amended_at=now,
     )

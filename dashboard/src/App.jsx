@@ -24,6 +24,16 @@ function AdminRoute({ children }) {
   return children;
 }
 
+function CareRoute({ children }) {
+  // The mirror of AdminRoute. The backend is the real enforcement -- it
+  // 403s a patient-data call from an admin token -- and this just keeps a
+  // stray URL from rendering a page whose every request will fail.
+  const { auth } = useAuth();
+  if (!auth) return <Navigate to="/login" replace />;
+  if (auth.role === "admin") return <Navigate to="/" replace />;
+  return children;
+}
+
 export default function App() {
   return (
     <AuthProvider>
@@ -46,11 +56,16 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+          {/* Patient routes are closed to the admin role, matching the
+              backend: an admin who types the URL is sent to the Overview
+              rather than shown a page that can only 403. */}
           <Route
             path="/patients"
             element={
               <ProtectedRoute>
-                <PatientsPage />
+                <CareRoute>
+                  <PatientsPage />
+                </CareRoute>
               </ProtectedRoute>
             }
           />
@@ -58,7 +73,9 @@ export default function App() {
             path="/patients/:patientId"
             element={
               <ProtectedRoute>
-                <PatientDetailPage />
+                <CareRoute>
+                  <PatientDetailPage />
+                </CareRoute>
               </ProtectedRoute>
             }
           />

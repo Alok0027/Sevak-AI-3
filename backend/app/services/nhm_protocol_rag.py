@@ -146,12 +146,26 @@ class NHMProtocolKnowledgeBase:
             ))
             score += 1.0
 
+        # Several thresholds below are right for any adult but were written
+        # up as though every patient were pregnant. The number does not
+        # change; the sentence the ASHA reads does. A 49-year-old man whose
+        # referral letter says he "meets the pre-eclampsia threshold" is an
+        # explanation that discredits the ones that are right -- and FR-03.2
+        # is about the explanation, not just the label.
+        antenatal = bool(extracted.pregnancy_stage)
+
         if extracted.bp_systolic and extracted.bp_diastolic:
             bp = f"{extracted.bp_systolic}/{extracted.bp_diastolic}"
             if extracted.bp_systolic >= HIGH_BP_SYSTOLIC or extracted.bp_diastolic >= HIGH_BP_DIASTOLIC:
                 drivers.append(RiskDriver(
                     observation=f"BP {bp}",
-                    reason="BP at or above 140/90 meets NHM pre-eclampsia risk threshold for pregnant patients.",
+                    reason=(
+                        "BP at or above 140/90 meets NHM pre-eclampsia risk threshold "
+                        "for pregnant patients."
+                        if antenatal else
+                        "BP at or above 140/90 is raised; NHM protocol warrants facility "
+                        "review."
+                    ),
                 ))
                 score += 0.5
             elif extracted.bp_systolic >= ELEVATED_BP_SYSTOLIC or extracted.bp_diastolic >= ELEVATED_BP_DIASTOLIC:
@@ -165,14 +179,26 @@ class NHMProtocolKnowledgeBase:
             detail = extracted.medication_compliance_detail or "medication"
             drivers.append(RiskDriver(
                 observation=f"Non-compliant: {detail}",
-                reason="Missed iron/medication course increases anaemia and complication risk per NHM ANC protocol.",
+                reason=(
+                    "Missed iron/medication course increases anaemia and complication "
+                    "risk per NHM ANC protocol."
+                    if antenatal else
+                    "A missed medication course raises the risk the condition it was "
+                    "prescribed for goes uncontrolled."
+                ),
             ))
             score += 0.25
 
         if extracted.temperature_c and extracted.temperature_c >= LOW_TEMP_FEVER_C:
             drivers.append(RiskDriver(
                 observation=f"Temperature {extracted.temperature_c}C",
-                reason="Fever during pregnancy requires prompt clinical evaluation per NHM protocol.",
+                reason=(
+                    "Fever during pregnancy requires prompt clinical evaluation per "
+                    "NHM protocol."
+                    if antenatal else
+                    "Fever at or above 38.0C warrants clinical evaluation per NHM "
+                    "protocol."
+                ),
             ))
             score += 0.3
 
@@ -185,6 +211,9 @@ class NHMProtocolKnowledgeBase:
                         f"Fasting glucose at or above {HIGH_FASTING_SUGAR} mg/dL meets the "
                         "diabetes threshold; in pregnancy this needs prompt review for "
                         "gestational diabetes per NHM protocol."
+                        if antenatal else
+                        f"Fasting glucose at or above {HIGH_FASTING_SUGAR} mg/dL meets the "
+                        "diabetes threshold and warrants facility review per NHM protocol."
                     ),
                 ))
                 score += 0.5

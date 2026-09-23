@@ -15,6 +15,7 @@ from app.db.models.action import Action
 from app.db.models.patient import Patient
 from app.db.models.visit import Visit
 from app.services import followup_schedule
+from app.services.audit import record_read as audit_read
 
 router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
 
@@ -23,9 +24,9 @@ router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
 def list_tasks(
     worker_id: str,
     db: DbSession,
-    _user=Depends(require_roles("asha")),
+    user=Depends(require_roles("asha")),
 ) -> dict:
-    require_worker_access(_user, db, worker_id)
+    require_worker_access(user, db, worker_id)
     rows = (
         db.query(Action, Visit, Patient)
         .join(Visit, Action.visit_id == Visit.visit_id)
@@ -78,6 +79,7 @@ def list_tasks(
             today.append(entry)
         else:
             existing["also_pending"] += 1
+    audit_read(db, user.worker_id, worker_id, "followup_task", count=len(tasks))
     return {
         "tasks": tasks,
         "today": today,

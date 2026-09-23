@@ -8,7 +8,7 @@ to check any number here without asking us a question.
 no evidence is listed as such rather than left out, because the gap
 itself is the honest answer to "does this actually work".
 
-Last updated: 19 September 2026
+Last updated: 20 September 2026
 
 ---
 
@@ -304,3 +304,40 @@ something real on its first run.
 No usability testing has been carried out with practising ASHA workers.
 The app's design is informed by published literature on ASHA workload
 and by NHM protocol documents, not by observed use.
+
+The app has also never run on the hardware it is designed for. Everything
+has been exercised on emulators and laptops; FR-07.4's target is a ~2GB
+RAM Android 10+ handset, and microphone permissions, recording behaviour,
+memory pressure and offline sync over a flaky connection are all unmeasured
+on real hardware.
+
+---
+
+## 7. Non-Hindi language coverage
+
+**Status: patterns exist, accuracy UNMEASURED -- and this is a different
+claim from section 2's.**
+
+Agent 1 calls an LLM and falls back to a rule-based extractor whenever
+that call fails or returns something unusable. That fallback covered
+English, romanised Hindi and Devanagari only, so a Tamil, Telugu or
+Bengali visit worked while the model was healthy and produced an empty
+record the moment it was not -- precisely when the fallback is meant to
+earn its place.
+
+Patterns for Bengali, Tamil and Telugu now exist for the fields that
+drive risk: age, gestational age, fever, weight, medication compliance,
+the seven NHM danger signs, and the three social risk factors.
+`backend/tests/test_multilingual_extraction.py` runs one clinical
+scenario through all four scripts and asserts the same HIGH
+classification comes out of each.
+
+**What that does not establish.** These patterns were checked by
+transliteration, not by native speakers, and they have never been run
+against real Bhashini output in these languages. A test that passes on
+text we wrote ourselves proves the patterns compile and fire; it says
+nothing about the phrasing an ASHA in Tamil Nadu actually uses. Treat
+this as a floor -- a failed model call now degrades to something rather
+than to silence -- and not as coverage. Closing it needs the same
+recording exercise section 2 asks for, in each language, with a native
+speaker reading the output.

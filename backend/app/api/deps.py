@@ -84,9 +84,12 @@ def visible_sub_centres(user: CurrentUser, db: Session) -> list[str] | None:
       and in a real multi-district deployment means every BMO in the
       state can read every other district's patients.
     - An Admin is unrestricted here, because the admin role administers
-      the system rather than a place. (Note that SRS table 4 also says an
-      Admin has *no* patient record access at all; that is a separate
-      gap, not one this function can close.)
+      the system rather than a place -- and what that unrestricted scope
+      now reaches is the worker roster and caseload reassignment, not
+      patient records. SRS table 4's "no patient record access" is
+      enforced at the endpoints themselves (see app/api/routes/patients.py
+      and reports.py), which is the right place for it: this function
+      answers "which area", and the question there was "which data".
 
     Fails closed: a supervisor with nothing to scope by gets a 403, never
     the whole country.

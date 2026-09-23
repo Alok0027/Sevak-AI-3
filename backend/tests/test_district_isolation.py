@@ -284,3 +284,63 @@ def test_district_is_filled_in_for_workers_that_predate_the_column(two_districts
         assert worker.district_id == "PUNE"
     finally:
         db.close()
+
+
+def test_an_admin_cannot_read_patient_records_but_keeps_the_system_it_administers():
+    """SRS table 4: the Admin role has worker onboarding, protocol
+    configuration and user management, and *no patient record access*.
+
+    It had that access for a long time because the role list was written
+    once and copied onto each new endpoint as it appeared. A system
+    administrator who can read every pregnant woman's clinical history in
+    the state is a standing DPDP exposure with no operational reason
+    behind it -- nothing an admin actually does needs a patient's name.
+    """
+    from fastapi.testclient import TestClient
+
+    from app.db.session import SessionLocal
+    from app.main import app
+    from scripts.seed_synthetic_data import seed_demo_fixtures
+
+    with TestClient(app) as client:
+        db = SessionLocal()
+        try:
+            seed_demo_fixtures(db)
+        finally:
+            db.close()
+
+        admin = client.post(
+            "/api/v1/auth/login", json={"phone": "9999999903", "pin": "1234"}
+        ).json()
+        headers = {"Authorization": f"Bearer {admin['access_token']}"}
+
+        asha = client.post(
+            "/api/v1/auth/login", json={"phone": "9999999999", "pin": "1234"}
+        ).json()
+
+        # Closed: anything that resolves to an identifiable patient.
+        closed = [
+            "/api/v1/patients",
+            f"/api/v1/patients/{asha['worker_id']}",
+            "/api/v1/reports/hmis/%s/6/2026" % asha["worker_id"],
+        ]
+        for path in closed:
+            resp = client.get(path, headers=headers)
+            assert resp.status_code == 403, (
+                f"{path} served patient data to an admin ({resp.status_code})"
+            )
+
+        # Open: the system an admin is actually responsible for. These are
+        # aggregates -- counts and village totals -- with no identities in
+        # them, so closing them would cost oversight and protect nobody.
+        for path in [
+            "/api/v1/dashboard/metrics",
+            "/api/v1/dashboard/heatmap",
+            "/api/v1/workers",
+            "/api/v1/admin/staff",
+            "/api/v1/admin/audit-log",
+        ]:
+            resp = client.get(path, headers=headers)
+            assert resp.status_code == 200, (
+                f"{path} should stay open to an admin, got {resp.status_code}"
+            )

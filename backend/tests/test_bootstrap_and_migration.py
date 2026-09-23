@@ -163,3 +163,50 @@ def test_the_seeded_demo_accounts_are_active():
         assert demo.status == "active"
     finally:
         db.close()
+
+
+def test_a_bmo_seeded_before_district_id_existed_is_repaired_not_left_broken():
+    """A demo account created by an older version of the seeder is missing
+    fields added since, and `seed_demo_fixtures` returns early rather than
+    filling them in.
+
+    The case that matters: `district_id` scopes a BMO to her own district,
+    and `deps.visible_sub_centres` fails closed without it -- so a BMO row
+    seeded before that column existed answers 403 on every dashboard
+    endpoint she owns, with nothing in the response explaining why, and no
+    shell on the free tier to correct it by hand.
+    """
+    from app.core.security import hash_pin
+    from app.db.models.worker import Worker
+    from app.db.session import SessionLocal
+    from scripts.seed_synthetic_data import repair_demo_accounts
+
+    db = SessionLocal()
+    try:
+        bmo = db.query(Worker).filter(Worker.phone == "9999999902").first()
+        if bmo is None:
+            bmo = Worker(name="Dr. Vikram Rao", phone="9999999902",
+                         pin_hash=hash_pin("1234"), role="bmo")
+            db.add(bmo)
+        bmo.district_id = None          # the pre-migration state
+        db.commit()
+
+        repaired = repair_demo_accounts(db)
+        db.refresh(bmo)
+
+        assert bmo.district_id == "PUNE", "the BMO was left unusable"
+        assert any("district_id" in r for r in repaired)
+
+        # Idempotent: a second run reports nothing and changes nothing.
+        assert repair_demo_accounts(db) == []
+
+        # And it never moves a worker who already has a district.
+        bmo.district_id = "NASHIK"
+        db.commit()
+        repair_demo_accounts(db)
+        db.refresh(bmo)
+        assert bmo.district_id == "NASHIK", "repair overwrote a real assignment"
+        bmo.district_id = "PUNE"
+        db.commit()
+    finally:
+        db.close()

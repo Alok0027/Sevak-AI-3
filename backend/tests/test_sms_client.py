@@ -192,8 +192,23 @@ def test_whatsapp_provider_selection():
         get_whatsapp_client(_twilio_settings(whatsapp_provider="twilio_sandbox")),
         TwilioWhatsAppClient,
     )
-    # The historical USE_MOCKS switch still means what it always did.
-    assert isinstance(get_whatsapp_client(_twilio_settings(use_mocks=False)), WhatsAppClient)
+    # The historical USE_MOCKS switch still means what it always did -- but
+    # only for a deployment that never set WHATSAPP_PROVIDER at all, which
+    # is what the empty string here says. (conftest exports
+    # WHATSAPP_PROVIDER=mock for the suite, and Settings reads real
+    # environment variables even with _env_file=None, so leaving this out
+    # asks a different question than it appears to.)
+    assert isinstance(
+        get_whatsapp_client(_twilio_settings(use_mocks=False, whatsapp_provider="")),
+        WhatsAppClient,
+    )
+    # An explicit "mock" means mock even when USE_MOCKS is off. Before this,
+    # setting the provider to mock to keep a rehearsal safe on a deployment
+    # with USE_MOCKS=false returned the live Meta client instead.
+    assert isinstance(
+        get_whatsapp_client(_twilio_settings(use_mocks=False, whatsapp_provider="mock")),
+        MockWhatsAppClient,
+    )
 
 
 # ── WhatsApp Cloud API (Meta) ───────────────────────────────────────────

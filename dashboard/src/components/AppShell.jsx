@@ -59,7 +59,12 @@ export default function AppShell({ title, scope, meta, actions, children }) {
 
         <ul className="rail-nav">
           <RailLink to="/" end label="Overview" hint="Numbers and accountability" />
-          <RailLink to="/patients" label="Patients" hint="Everyone under care" />
+          {/* Not shown to an admin: the backend no longer serves patient
+              records to that role at all (SRS table 4 -- the admin
+              administers the system, not the care), so the link would
+              lead only to a 403. The aggregate Overview stays, because
+              counts and village totals carry no identities. */}
+          {!isAdmin && <RailLink to="/patients" label="Patients" hint="Everyone under care" />}
           {isAdmin && <RailLink to="/admin" label="Administration" hint="Workers and audit" />}
         </ul>
 

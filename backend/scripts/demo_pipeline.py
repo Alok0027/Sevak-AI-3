@@ -29,9 +29,35 @@ DEMO_TRANSCRIPT_HI = (
 )
 
 
+def _demo_settings():
+    """Force every external provider to its mock for this script.
+
+    The "audio" below is base64 of a Hindi sentence, which only the mock STT
+    can read back. A real provider is handed it as an audio file and fails
+    on the first byte -- so with the team's working .env in place (Bhashini
+    + a real LLM + Meta WhatsApp) this script used to die with "Could not
+    decode the submitted audio" rather than print the demo it promises.
+
+    Overriding a copy rather than the cached settings leaves ENCRYPTION_KEY
+    and DATABASE_URL exactly as configured, so this still reads and writes
+    the same database as the API. It also means the script keeps its own
+    promise -- zero network calls, zero API keys -- no matter what .env
+    happens to say, which is the point of having it.
+    """
+    return get_settings().model_copy(
+        update={
+            "stt_provider": "mock",
+            "llm_provider": "mock",
+            "whatsapp_provider": "mock",
+            "sms_provider": "mock",
+            "use_mocks": True,
+        }
+    )
+
+
 async def main() -> None:
     db = SessionLocal()
-    settings = get_settings()
+    settings = _demo_settings()
     try:
         worker = db.query(Worker).filter(Worker.phone == "9999999999").first()
         # Patient.name is encrypted at rest (NFR-SC1) -- a SQL-level `==`

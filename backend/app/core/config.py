@@ -68,7 +68,14 @@ class Settings(BaseSettings):
     #                     the TWILIO_* credentials below. Each recipient
     #                     must first send "join <code>" to the sandbox
     #                     number, and the session lapses after three days.
-    whatsapp_provider: str = "mock"
+    #
+    # The default is empty, not "mock", so that "never configured" and
+    # "deliberately set to mock" stay tellable apart. An unset provider
+    # keeps the historical USE_MOCKS-driven behaviour; an explicit "mock"
+    # means mock, full stop. Before this, setting WHATSAPP_PROVIDER=mock to
+    # make a rehearsal safe on a deployment with USE_MOCKS=false handed you
+    # the live Meta client and sent real messages to real phone numbers.
+    whatsapp_provider: str = ""
     whatsapp_api_token: str = ""
     whatsapp_phone_number_id: str = ""
     # The approved template Agent 3 sends on the meta path. A follow-up

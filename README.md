@@ -43,7 +43,7 @@ immediate. Open it a minute before you need it.
 ```bash
 cd backend
 pip install -r requirements.txt
-cp .env.example .env
+cp -n .env.example .env   # -n: never clobber an .env that already holds real keys
 python -m scripts.seed_synthetic_data
 python -m scripts.demo_pipeline
 ```
@@ -61,7 +61,7 @@ Then bring up the full stack:
 cd backend && uvicorn app.main:app --reload
 
 # terminal 2
-cd dashboard && npm install && cp .env.example .env && npm run dev
+cd dashboard && npm install && cp -n .env.example .env && npm run dev
 ```
 
 Open http://localhost:5173, sign in as the demo ANM (`9999999901` / `1234`),
@@ -198,14 +198,37 @@ Plain `http` works in debug builds only. `android/app/src/debug/
 AndroidManifest.xml` permits cleartext there and nowhere else, so a release
 build must be given an `https` URL.
 
-### What is not set up
+### Migrations
 
-No Alembic migrations. Tables are created by `init_db()` at startup, which
-is correct exactly once, against an empty database. `create_all()` never
-alters a table that already exists, so the first model change after a
-deploy will leave Postgres missing a column and the error will arrive at
-runtime, in whichever endpoint touches it first. Add Alembic before the
-schema next changes, not after.
+Alembic is set up, with one baseline revision describing the schema as it
+stood when migrations arrived (`backend/alembic/versions/`).
+
+**An existing deployment** already has these tables, created by the old
+`create_all()` path. Tell Alembic they are there rather than trying to
+create them again:
+
+```bash
+cd backend && alembic stamp head
+```
+
+**A new database** gets everything from the migration:
+
+```bash
+cd backend && alembic upgrade head
+```
+
+From then on a model change means a revision, read before it is applied:
+
+```bash
+cd backend && alembic revision --autogenerate -m "what changed"
+```
+
+`init_db()`'s `create_all()` still runs at startup, which is what keeps the
+test suite and a zero-setup dev database working, and
+`_add_missing_columns()` remains so a deployment that has not been stamped
+still boots. Neither is the mechanism to add a column with any more --
+that is what the revisions are for. `backend/tests/test_migrations.py`
+fails if the two ever describe different schemas.
 
 CI does not run the test suite on push. Run it before deploying:
 

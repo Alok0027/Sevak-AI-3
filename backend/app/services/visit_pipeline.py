@@ -156,7 +156,9 @@ async def run_voice_visit(
             if alert is not None:
                 db.add(alert)
                 db.commit()
-                await deliver_escalation_alerts(db, whatsapp_client, sms_client)
+                # Scoped to this visit: the backlog is the outbox worker's
+                # problem, not something to make an ASHA wait through.
+                await deliver_escalation_alerts(db, sms_client, visit_id=visit.visit_id)
         except Exception:  # noqa: BLE001 -- see above
             logger.exception("immediate HIGH-risk alert failed after visit %s", visit.visit_id)
 

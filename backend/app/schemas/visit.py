@@ -170,3 +170,49 @@ class RiskOverrideResponse(BaseModel):
     overridden_by_name: str
     overridden_by_role: str  # asha | anm | bmo
     overridden_at: datetime
+
+
+class VisitAmendRequest(BaseModel):
+    """PATCH /api/v1/visits/{visit_id}/record -- correct what was recorded.
+
+    FR-01.4 lets an ASHA review the transcript *before* the pipeline runs.
+    Nothing let her fix it afterwards. A blood pressure misheard as 140/90
+    when the cuff read 120/80 kept driving the risk score, the referral
+    letter and the follow-up deadline for the life of the record, and the
+    only tool available -- a risk override -- changes the label while
+    leaving the wrong reading sitting underneath it, which is worse than
+    either being wrong on its own.
+
+    Only the fields sent are amended. `None` means "leave alone"; the
+    explicit `clear_*` flags are how a reading is removed outright, for a
+    value that was never actually taken.
+    """
+
+    bp_systolic: int | None = Field(default=None, ge=40, le=300)
+    bp_diastolic: int | None = Field(default=None, ge=20, le=200)
+    temperature_c: float | None = Field(default=None, ge=30.0, le=45.0)
+    weight_kg: float | None = Field(default=None, ge=1.0, le=300.0)
+    blood_sugar_fasting: int | None = Field(default=None, ge=20, le=600)
+    blood_sugar_random: int | None = Field(default=None, ge=20, le=600)
+    pregnancy_stage: str | None = None
+    medication_compliance: str | None = None
+
+    clear_bp: bool = False
+    clear_temperature: bool = False
+    clear_blood_sugar: bool = False
+    clear_pregnancy_stage: bool = False
+
+    reason: str = Field(min_length=5, max_length=500)
+
+
+class VisitAmendResponse(BaseModel):
+    visit_id: str
+    patient_id: str
+    amended_fields: dict
+    previous_risk_level: str | None
+    new_risk_level: str
+    risk_score: float
+    risk_drivers: list[RiskDriver]
+    override_cleared: bool
+    amended_by: str
+    amended_at: datetime

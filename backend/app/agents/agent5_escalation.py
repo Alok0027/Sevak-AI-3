@@ -21,7 +21,9 @@ Two different requirements, two different clocks, deliberately not merged:
   district where nobody visits a patient for two days never escalates.
 
 `deliver_escalation_alerts` sends whichever of the two is pending; the
-caller decides synchronous vs deferred by choosing when to call it.
+caller decides synchronous vs deferred by choosing when to call it, and
+passes `visit_id` to keep a request-path send from draining the whole
+district's backlog.
 
 An action row rather than a new column on risk_flags, deliberately: the
 actions table already carries status/sent_at and is already rendered in
@@ -159,9 +161,28 @@ def build_immediate_alert(db: Session, flag: RiskFlag) -> Action | None:
     )
 
 
-async def deliver_escalation_alerts(db: Session, whatsapp_client=None, sms_client=None) -> int:
-    """Send every pending alert -- both immediate_alert and escalation_alert.
+async def deliver_escalation_alerts(
+    db: Session, sms_client=None, visit_id: str | None = None
+) -> int:
+    """Send pending alerts -- both immediate_alert and escalation_alert.
     Returns how many went out.
+
+    `visit_id` scopes delivery to one visit's alerts, and the caller on the
+    request path (visit_pipeline) always passes it. Without it this drains
+    every pending alert in the database, which is correct for a background
+    sweep and badly wrong inside a web request: an ASHA finishing a HIGH
+    visit would wait on one network send per undelivered alert in the whole
+    district, and a backlog that built up while SMS was switched off turns
+    her 30-second visit into minutes. The alerts still there after this
+    returns are somebody else's to deliver, not hers to wait for.
+
+    Supervisor dispatch is SMS only, matching scripts.process_notifications
+    and docs/RELIABILITY_ROLLOUT.md step 6. There is deliberately no
+    WhatsApp fallback: an alert to a supervisor is business-initiated, so
+    Meta refuses the free-form text with 131047 unless a 24-hour window
+    happens to be open -- which means the fallback either fails or, worse,
+    succeeds unpredictably for whichever supervisor last messaged the
+    business number.
 
     Failures are recorded on the action as status "failed" rather than
     raised: this can run at the tail of a visit (see visit_pipeline), and a
@@ -169,11 +190,12 @@ async def deliver_escalation_alerts(db: Session, whatsapp_client=None, sms_clien
     The row stays visible, so a persistent failure shows up as a column of
     "failed" alerts rather than as silence.
     """
-    pending = (
-        db.query(Action)
-        .filter(Action.type.in_(ALERT_ACTION_TYPES), Action.status == "pending")
-        .all()
+    query = db.query(Action).filter(
+        Action.type.in_(ALERT_ACTION_TYPES), Action.status == "pending"
     )
+    if visit_id is not None:
+        query = query.filter(Action.visit_id == visit_id)
+    pending = query.all()
     if not pending:
         return 0
 
@@ -191,8 +213,6 @@ async def deliver_escalation_alerts(db: Session, whatsapp_client=None, sms_clien
         try:
             if sms_client is not None and not isinstance(sms_client, MockSmsClient):
                 await sms_client.send_message(supervisor.phone, action.content)
-            elif whatsapp_client is not None:
-                await whatsapp_client.send_message(supervisor.phone, action.content)
             else:
                 # No real channel configured. The alert stays pending rather
                 # than being marked sent, so turning SMS on later delivers

@@ -16,7 +16,7 @@ def preview(action, visit, patient, channel, settings):
         raise HTTPException(422, "Patient has no phone number")
     payload = {"channel": channel, "phone": patient.phone, "text": action.content}
     effective_wa = settings.whatsapp_provider.lower()
-    if effective_wa == "mock" and not settings.use_mocks:
+    if not effective_wa and not settings.use_mocks:
         effective_wa = "meta"
     if channel == "whatsapp" and effective_wa == "meta":
         if settings.whatsapp_template_name != "followup_reminder" or settings.whatsapp_template_language != "hi":
@@ -59,7 +59,7 @@ async def deliver_due(db, settings, limit=50):
         data = json.loads(item.payload_json)
         try:
             provider = settings.whatsapp_provider if data["channel"] == "whatsapp" else settings.sms_provider
-            if data["channel"] == "whatsapp" and provider == "mock" and not settings.use_mocks:
+            if data["channel"] == "whatsapp" and not provider and not settings.use_mocks:
                 provider = "meta"
             if data.get("provider") != provider:
                 item.status = "blocked"

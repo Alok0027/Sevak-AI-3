@@ -77,4 +77,24 @@ class Patient(Base):
     bp_diastolic: Mapped[int] = mapped_column(Integer, nullable=True)
     blood_sugar_fasting: Mapped[int] = mapped_column(Integer, nullable=True)
     blood_sugar_random: Mapped[int] = mapped_column(Integer, nullable=True)
+    # ── Whether she is still on the caseload ────────────────────────────
+    #
+    # "active" | "moved" | "deceased" | "inactive".
+    #
+    # Every paper register a sub-centre keeps has a way to close a line.
+    # This one did not: a woman who moved to another district, or who
+    # died, stayed on her ASHA's list forever, generating follow-up tasks
+    # that could never be completed and counting against the sub-centre's
+    # compliance figures. The only way to stop it was to leave the task
+    # permanently overdue.
+    #
+    # Closing is not deletion. Her visits, risk flags and reports stay
+    # exactly as they were -- they are the record of care actually given,
+    # and a district's historical figures must not change because somebody
+    # moved house. What closing stops is future obligation.
+    status: Mapped[str] = mapped_column(String, default="active", nullable=False, index=True)
+    closed_reason: Mapped[str] = mapped_column(EncryptedString, nullable=True)
+    closed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    closed_by: Mapped[str] = mapped_column(String, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))

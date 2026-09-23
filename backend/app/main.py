@@ -44,6 +44,21 @@ async def lifespan(_app: FastAPI):
             logger.exception("demo seeding failed; continuing without it")
         finally:
             db.close()
+    else:
+        # Even with seeding off, repair scoping fields the demo accounts
+        # are missing: a BMO seeded before district_id existed gets 403 on
+        # every endpoint she owns, and there is no shell on the free tier
+        # to fix it by hand. Only ever fills an empty field.
+        from scripts.seed_synthetic_data import repair_demo_accounts
+
+        db = SessionLocal()
+        try:
+            if repaired := repair_demo_accounts(db):
+                logger.info("repaired demo account scoping: %s", ", ".join(repaired))
+        except Exception:  # noqa: BLE001 -- see above
+            logger.exception("demo account repair failed; continuing without it")
+        finally:
+            db.close()
 
     # Worker codes, village keys and the phone blind index, for rows that
     # predate those columns.

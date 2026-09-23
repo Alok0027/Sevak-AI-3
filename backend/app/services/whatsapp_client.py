@@ -196,6 +196,8 @@ def get_whatsapp_client(settings: Settings) -> WhatsAppClientBase:
         return TwilioWhatsAppClient(settings)
     if provider == "meta":
         return WhatsAppClient(settings)
-    # "mock" is the default and keeps the original USE_MOCKS-driven
-    # behaviour, so nothing that relied on it changes meaning.
+    if provider == "mock":
+        return MockWhatsAppClient()
+    # Unset: keeps the original USE_MOCKS-driven behaviour, so a deployment
+    # that never configured this one variable does not change meaning.
     return MockWhatsAppClient() if settings.use_mocks else WhatsAppClient(settings)

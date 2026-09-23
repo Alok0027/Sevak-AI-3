@@ -32,3 +32,4 @@ av>=12.0               # Audio decode/resample for the Bhashini path. NOT
 psycopg2-binary>=2.9   # Postgres driver. SQLite is fine locally, but every
                        # managed host gives you Postgres and an ephemeral
                        # disk -- a SQLite file there is wiped on redeploy.
+alembic>=1.13

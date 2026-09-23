@@ -43,3 +43,7 @@ mobile/.packages
 # Scratch: transfer tarballs and files retired during development. Not
 # project source; safe to delete whenever.
 _to_delete/
+
+# Alembic scratch database used when generating a baseline revision
+alembic_baseline.db
+_alembic_check.db

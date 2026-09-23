@@ -12,7 +12,7 @@ metrics -> heatmap -> escalations all render with live data).
 ```bash
 cd dashboard
 npm install
-cp .env.example .env        # point VITE_API_BASE_URL at your backend if not localhost:8000
+cp -n .env.example .env     # -n: keeps an existing .env; point VITE_API_BASE_URL at your backend
 npm run dev                 # http://localhost:5173 -- make sure ../backend is running too
 ```
 

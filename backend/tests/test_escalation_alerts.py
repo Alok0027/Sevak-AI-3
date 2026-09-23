@@ -217,3 +217,41 @@ def test_immediate_alert_falls_back_to_bmo_with_no_anm(db):
     alert = build_immediate_alert(db, flag)
     assert alert is not None
     assert "BMO" in alert.content
+
+
+def test_delivery_scoped_to_a_visit_ignores_every_other_pending_alert(db):
+    """A HIGH visit must not make the ASHA wait on the district's backlog.
+
+    `deliver_escalation_alerts` used to select every pending alert in the
+    database, and visit_pipeline awaited it inside POST /visits/voice. One
+    ASHA finishing a visit therefore paid one network send per undelivered
+    alert anywhere in the deployment -- a seeded database carrying 132 of
+    them turned a 30-second visit into minutes of sends she had no reason
+    to be waiting for.
+    """
+    class _Recording(SmsClientBase):
+        def __init__(self):
+            self.sent = []
+
+        async def send_message(self, to, body):
+            self.sent.append(body)
+            return {"status": "sent"}
+
+    backlog = _stale_high_flag(db)
+    check_and_escalate(db)
+    assert _alerts_for(db, backlog), "expected a pending alert to act as backlog"
+
+    mine = _stale_high_flag(db, hours_old=0)
+    alert = build_immediate_alert(db, mine)
+    db.add(alert)
+    db.commit()
+
+    sms = _Recording()
+    sent = asyncio.run(deliver_escalation_alerts(db, sms_client=sms, visit_id=mine.visit_id))
+
+    assert sent == 1, "scoped delivery sent more than this visit's own alert"
+    assert len(sms.sent) == 1
+    db.refresh(alert)
+    assert alert.status == "sent"
+    # The backlog is untouched -- still pending for the outbox worker.
+    assert _alerts_for(db, backlog)[0].status == "pending"

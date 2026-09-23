@@ -33,11 +33,28 @@ from app.services.vitals_parsing import find_blood_sugar, find_bp
 # either script -- otherwise a real spoken visit extracts nothing and the
 # risk score below is computed from an empty record, which reads as a
 # healthy patient rather than an unassessed one.
-_AGE_UNIT = r"saal|years?|yrs?|साल|बरस|वर्ष"
+_AGE_UNIT = (
+    r"saal|years?|yrs?|साल|बरस|वर्ष"
+    r"|বছর|বয়স"          # Bengali: bochor (year), boyosh (age)
+    r"|வயது|ஆண்டு|வருடம்"  # Tamil: vayathu (age), aandu/varudam (year)
+    r"|సంవత్సరం|ఏళ్ళు|ఏళ్లు|వయసు"  # Telugu: samvatsaram/ellu (year), vayasu (age)
+)
 # Devanagari letters and matras only -- the full "ऀ-ॿ" block also contains
 # the danda (U+0964) and the Devanagari digits, so a name built on it runs
 # straight through sentence breaks and ages.
-_LETTER = r"A-Za-zऀ-ॣॱ-ॿ"
+#
+# Bengali, Tamil and Telugu are included on the same terms: consonant and
+# vowel ranges plus their matras, and deliberately NOT each script's digit
+# block (\u09E6-\u09EF, \u0BE6-\u0BEF, \u0C66-\u0C6F), for exactly the
+# reason the Devanagari comment above gives. The app offers these three
+# languages in its UI, so a transcript can arrive in any of them.
+_LETTER = (
+    r"A-Za-z"
+    r"ऀ-ॣॱ-ॿ"                      # Devanagari (Hindi, Marathi)
+    r"\u0985-\u09B9\u09BE-\u09CC\u09CE\u09DC-\u09DF"   # Bengali
+    r"\u0B85-\u0BB9\u0BBE-\u0BCD"                        # Tamil
+    r"\u0C05-\u0C39\u0C3E-\u0C4D"                        # Telugu
+)
 
 # Ages and gestational ages are routinely spoken as words rather than
 # digits ("बत्तीस साल", "छ महीना"), and gestational age drives the
@@ -46,7 +63,12 @@ _NUMBER = rf"\d{{1,3}}|{NUMBER_WORD_PATTERN}"
 _NAME_AGE_RE = re.compile(
     rf"([{_LETTER}][{_LETTER} .]*?),?\s*({_NUMBER})\s*(?:{_AGE_UNIT})", re.IGNORECASE
 )
-_MONTH_WORD = r"mahine|mahina|month|महीने|महीना|माह"
+_MONTH_WORD = (
+    r"mahine|mahina|month|महीने|महीना|माह"
+    r"|মাস"        # Bengali: mash
+    r"|மாதம்"      # Tamil: maadham
+    r"|నెల|నెలల"    # Telugu: nela
+)
 _PREGNANCY_RE = re.compile(rf"({_NUMBER})\s*(?:{_MONTH_WORD})s?", re.IGNORECASE)
 
 # Violence and injury. Deliberately its own category rather than another
@@ -72,11 +94,11 @@ _VIOLENCE_RULES = [
     ),
 ]
 _TEMP_RE = re.compile(
-    r"(?:temperature|bukhar|fever|बुखार|तापमान)\D{0,12}(\d{2,3}(?:\.\d)?)", re.IGNORECASE
+    r"(?:temperature|bukhar|fever|बुखार|तापमान|জ্বর|காய்ச்சல்|జ్వరం)\D{0,12}(\d{2,3}(?:\.\d)?)", re.IGNORECASE
 )
 # "101 डिग्री बुखार" puts the number before the word, which _TEMP_RE can't see.
 _TEMP_BEFORE_RE = re.compile(r"(\d{2,3}(?:\.\d)?)\s*(?:degrees?|डिग्री)", re.IGNORECASE)
-_WEIGHT_RE = re.compile(r"(\d{2,3}(?:\.\d)?)\s*(?:kg|kilo|किलो|के\.?\s?जी\.?)", re.IGNORECASE)
+_WEIGHT_RE = re.compile(r"(\d{2,3}(?:\.\d)?)\s*(?:kg|kilo|किलो|के\.?\s?जी\.?|কেজি|கிலோ|కిలో)", re.IGNORECASE)
 _DURATION_RE = re.compile(
     r"(pichle|last|पिछले|पिछला)\s*(\d+)\s*(hafte|din|week|day|हफ्ते|हफ्ता|दिन)s?", re.IGNORECASE
 )
@@ -84,23 +106,38 @@ _DURATION_RE = re.compile(
 _MED_KEYWORDS = [
     "iron tablet", "tablet", "medicine", "dawai", "dawaai",
     "आयरन", "गोली", "गोलियां", "दवा", "दवाई", "टैबलेट",
+    # Bengali: tabletting/oshudh/bori (tablet, medicine, pill)
+    "ট্যাবলেট", "ওষুধ", "বড়ি", "আয়রন",
+    # Tamil: maathirai (tablet), marundhu (medicine), irumbu (iron)
+    "மாத்திரை", "மருந்து", "இரும்பு",
+    # Telugu: maatra (tablet), mandu (medicine), inumu (iron)
+    "మాత్ర", "మందు", "ఇనుము",
 ]
 _NON_COMPLIANCE_MARKERS = [
     "nahi li", "nahi liya", "not taken", "skipped", "missed",
     "नहीं ली", "नहीं लिया", "नहीं खाई", "नहीं लेती", "नहीं ले",
+    # Bengali: khayni / neyni / khaccche na (has not eaten/taken it)
+    "খায়নি", "নেয়নি", "খাচ্ছে না", "নেননি",
+    # Tamil: edukkavillai / saappidavillai (did not take / did not eat)
+    "எடுக்கவில்லை", "சாப்பிடவில்லை", "போடவில்லை",
+    # Telugu: teesukoledu / vesukoledu (did not take)
+    "తీసుకోలేదు", "వేసుకోలేదు", "తినలేదు",
 ]
 
 _SOCIAL_RISK_RULES = [
     (
-        re.compile(r"pati\s+bahar|husband\s+(is\s+)?(away|absent)|पति\s+बाहर|पति\s+नहीं", re.IGNORECASE),
+        re.compile(r"pati\s+bahar|husband\s+(is\s+)?(away|absent)|पति\s+बाहर|पति\s+नहीं"
+                   r"|স্বামী\s*(বাইরে|নেই)|கணவர்\s*(வெளியே|இல்லை)|భర్త\s*(బయట|లేడు)", re.IGNORECASE),
         "absent spouse",
     ),
     (
-        re.compile(r"akel[ai]|isolated|alone at home|अकेली|अकेला", re.IGNORECASE),
+        re.compile(r"akel[ai]|isolated|alone at home|अकेली|अकेला"
+                   r"|একা|তনিযা|தனியாக|தனியே|ఒంటరిగా|ఒక్కతే", re.IGNORECASE),
         "household isolation",
     ),
     (
-        re.compile(r"paisa\s*nahi|no money|can'?t afford|gareeb|पैसा\s*नहीं|पैसे\s*नहीं|गरीब", re.IGNORECASE),
+        re.compile(r"paisa\s*nahi|no money|can'?t afford|gareeb|पैसा\s*नहीं|पैसे\s*नहीं|गरीब"
+                   r"|টাকা\s*নেই|গরিব|பணம்\s*இல்லை|ஏழை|డబ్బు\s*లేదు|పేద", re.IGNORECASE),
         "economic stress",
     ),
 ]
@@ -117,26 +154,31 @@ _SOCIAL_RISK_RULES = [
 _DANGER_SIGN_RULES = [
     (
         re.compile(r"severe\s+headache|tez\s+(sir\s*)?dard|sir\s+(mein\s+)?dard|"
+                   r"মাথা\s*ব্যথা|মাথা\s*যন্ত্রণা|தலைவலி|తలనొప్పి|"
                    r"सिर\s*(में)?\s*(तेज़?\s*)?दर्द", re.IGNORECASE),
         "Severe headache, with or without blurred vision",
     ),
     (
-        re.compile(r"blurr?(ed|y)\s+vision|dhundla|dikhai\s+nahi|धुंधला|दिखाई\s*नहीं",
+        re.compile(r"blurr?(ed|y)\s+vision|dhundla|dikhai\s+nahi|धुंधला|दिखाई\s*नहीं|"
+                   r"ঝাপসা|চোখে\s*দেখ|மங்கலா|கண்\s*மங்|మసక|కళ్లు\s*మసక",
                    re.IGNORECASE),
         "Blurred vision",
     ),
     (
-        re.compile(r"convuls|seizure|fits?\b|unconscious|behosh|daura|दौरा|बेहोश",
+        re.compile(r"convuls|seizure|fits?\b|unconscious|behosh|daura|दौरा|बेहोश|"
+                   r"খিঁচুনি|অজ্ঞান|வலிப்பு|மயக்கம்|మూర్ఛ|స్పృహ\s*కోల్పో",
                    re.IGNORECASE),
         "Convulsions or loss of consciousness",
     ),
     (
-        re.compile(r"bleeding|blood\s+loss|khoon\s*(aa|beh)|रक्तस्राव|खून\s*आ",
+        re.compile(r"bleeding|blood\s+loss|khoon\s*(aa|beh)|रक्तस्राव|खून\s*आ|"
+                   r"রক্তপাত|রক্ত\s*যাচ্ছে|ரத்தப்போக்கு|இரத்தப்\s*போக்கு|రక్తస్రావం|రక్తం\s*పోతు",
                    re.IGNORECASE),
         "Bleeding during pregnancy",
     ),
     (
         re.compile(r"severe\s+abdominal\s+pain|continuous\s+abdominal|pet\s+(mein\s+)?tez\s+dard|"
+                   r"পেটে\s*ব্যথা|வயிற்று\s*வலி|కడుపు\s*నొప్పి|"
                    r"पेट\s*(में)?\s*तेज़?\s*दर्द", re.IGNORECASE),
         "Continuous severe abdominal pain",
     ),

@@ -64,21 +64,7 @@ def get_db() -> Generator[Session, None, None]:
 
 def init_db() -> None:
     """Create all tables. Fine for SQLite dev / demo; use Alembic migrations for real Postgres."""
-    from app.db.models import (  # noqa: F401  (import to register with Base.metadata)
-        absence,
-        action,
-        audit_log,
-        hmis_report,
-        patient,
-        risk_flag,
-        support_ticket,
-        sync_queue,
-        visit,
-        visit_request,
-        notification,
-        risk_resolution,
-        worker,
-    )
+    import app.db.models  # noqa: F401  -- registers every model on Base.metadata
 
     Base.metadata.create_all(bind=engine)
     _add_missing_columns()
@@ -104,6 +90,14 @@ _ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "phone_hash": "TEXT",
         "village_code": "TEXT",
         "sub_centre_id": "TEXT",
+        # Caseload closure -- see Patient.status. The DEFAULT matters the
+        # same way the workers.status one below does: every patient row
+        # already in the database has to land on 'active', or she drops
+        # out of her own ASHA's list the moment this ships.
+        "status": "TEXT NOT NULL DEFAULT 'active'",
+        "closed_reason": "TEXT",
+        "closed_at": "TIMESTAMP",
+        "closed_by": "TEXT",
     },
     # Registration + approval. The DEFAULT matters as much as the column:
     # it is what every worker row already in the database gets, and without
@@ -168,6 +162,7 @@ def _add_missing_columns() -> None:
     if not is_sqlite:
         with engine.connect() as conn:
             conn.exec_driver_sql("UPDATE workers SET status = 'active' WHERE status IS NULL")
+            conn.exec_driver_sql("UPDATE patients SET status = 'active' WHERE status IS NULL")
             conn.commit()
 
 

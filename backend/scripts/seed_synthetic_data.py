@@ -25,12 +25,17 @@ from faker import Faker
 
 from app.core.security import hash_pin
 from app.db.models.action import Action
+from app.db.models.audit_log import AuditLog
 from app.db.models.patient import Patient
 from app.db.models.risk_flag import RiskFlag
 from app.db.models.visit import Visit
 from app.db.models.worker import Worker
 from app.agents.agent2_risk_classification import classify
-from app.agents.agent3_action_generation import FOLLOWUP_DAYS as AGENT3_FOLLOWUP_DAYS
+from app.agents.agent3_action_generation import (
+    FOLLOWUP_DAYS as AGENT3_FOLLOWUP_DAYS,
+    build_patient_message,
+    build_referral_letter,
+)
 from app.db.session import SessionLocal, backfill_identity, init_db
 from app.services import identity
 from app.schemas.visit import ExtractedFields
@@ -64,10 +69,57 @@ DEMO_WORKER_PHONE = "9999999999"
 DEMO_WORKER_PIN = "1234"
 
 
+# The scoping fields each demo account needs in order to be usable. An
+# account missing one is not merely incomplete -- deps.visible_sub_centres
+# fails closed, so a BMO with no district_id gets 403 on every dashboard
+# endpoint she owns.
+_DEMO_SCOPING = {
+    DEMO_WORKER_PHONE: {"sub_centre_id": "SC-PUNE-01"},
+    "9999999901": {"sub_centre_id": "SC-PUNE-01"},   # ANM
+    "9999999902": {"district_id": "PUNE"},           # BMO
+}
+
+
+def repair_demo_accounts(db) -> list[str]:
+    """Fill in scoping fields the demo accounts are missing, idempotently.
+
+    `district_id` arrived after these accounts did (it is what scopes a BMO
+    to her own district instead of the whole database). Any deployment
+    seeded before that has a BMO row with `district_id = NULL`, and because
+    `visible_sub_centres` fails closed rather than handing her everything,
+    every BMO dashboard endpoint answers 403 -- the demo login simply does
+    not work, with no clue as to why.
+
+    `seed_demo_fixtures` cannot fix it: it returns early once the demo ASHA
+    exists, which is the correct behaviour for seeding and the wrong one
+    for repair. Hence this, which runs on the already-seeded path too.
+
+    Deliberately additive: it only ever fills a field that is empty, so it
+    cannot move a real worker between sub-centres or districts, and it
+    touches nothing but the three known demo phone numbers. Returns what it
+    changed, for the startup log.
+    """
+    repaired = []
+    for phone, fields in _DEMO_SCOPING.items():
+        worker = db.query(Worker).filter(Worker.phone == phone).first()
+        if worker is None:
+            continue
+        for field, value in fields.items():
+            if not (getattr(worker, field) or "").strip():
+                setattr(worker, field, value)
+                repaired.append(f"{worker.name}.{field}={value}")
+    if repaired:
+        db.commit()
+    return repaired
+
+
 def seed_demo_fixtures(db) -> None:
     """The exact accounts/patient used in the SRS section 9 demo script."""
     if db.query(Worker).filter(Worker.phone == DEMO_WORKER_PHONE).first():
-        return  # already seeded
+        # Already seeded -- but an account created by an older version of
+        # this function may still be missing a field added since.
+        repair_demo_accounts(db)
+        return
 
     sunita = Worker(
         name="Sunita Sharma",
@@ -94,6 +146,7 @@ def seed_demo_fixtures(db) -> None:
     )
     db.add_all([sunita, anm, bmo, admin])
     db.flush()
+    repair_demo_accounts(db)  # one definition of what each demo account needs
 
     meera = Patient(
         worker_id=sunita.worker_id,
@@ -236,6 +289,15 @@ def seed_caseload(db, worker, patients_per_worker: int, months_history: int) -> 
         )
         db.add(patient)
         db.flush()
+        db.add(
+            AuditLog(
+                user_id=worker.worker_id,
+                action_type="patient.create",
+                record_id=patient.patient_id,
+                record_type="patient",
+                timestamp=datetime.now(timezone.utc) - timedelta(days=months_history * 30),
+            )
+        )
 
         n_visits = random.randint(0, 3 * months_history)
         for _ in range(n_visits):
@@ -286,6 +348,50 @@ def seed_caseload(db, worker, patients_per_worker: int, months_history: int) -> 
                 )
             )
 
+            # The same three actions Agent 3 would have produced for this
+            # visit, by the same rules (agent3.generate): a referral letter
+            # for HIGH only, a patient message for anything assessed, and a
+            # follow-up task always.
+            #
+            # Seeding only the follow-up -- which is what this did before --
+            # left every historical HIGH patient in the demo database with an
+            # empty actions timeline. The referral letter and patient message
+            # are two thirds of what the product does, and the only place
+            # they appeared was the single visit recorded live during a demo.
+            if risk_level == "HIGH":
+                db.add(
+                    Action(
+                        visit_id=visit.visit_id,
+                        type="referral",
+                        content=build_referral_letter(
+                            phc_name=identity.phc_name(worker.sub_centre_id),
+                            patient_name=patient.name,
+                            reason_text="; ".join(
+                                f"{d.observation} -- {d.reason}" for d in result.drivers
+                            ),
+                            language_code=worker.language_pref or "hi",
+                            age=patient.age,
+                            pregnancy_stage=patient.pregnancy_stage,
+                        ),
+                        status="draft",
+                        created_at=created_at,
+                    )
+                )
+            if risk_level != "UNASSESSED":
+                db.add(
+                    Action(
+                        visit_id=visit.visit_id,
+                        type="whatsapp",
+                        content=build_patient_message(patient.name, risk_level),
+                        # Draft, never "sent": nothing reaches a patient
+                        # without an ASHA approving that exact text, and a
+                        # seeded row must not claim a message went out that
+                        # no provider ever accepted.
+                        status="draft",
+                        created_at=created_at,
+                    )
+                )
+
             # FR-04.3: every visit gets a follow-up task, due date by risk
             # level. Older ones are randomly resolved so the dashboard's
             # done/pending/overdue split has all three buckets populated.
@@ -300,6 +406,22 @@ def seed_caseload(db, worker, patients_per_worker: int, months_history: int) -> 
                     status="done" if is_resolved else "pending",
                     due_at=due_at,
                     created_at=created_at,
+                )
+            )
+
+            # NFR-SC4: the audit trail the live pipeline writes for every
+            # visit (visit_pipeline.run_voice_visit). Seeding the visits but
+            # not their audit rows left the demo database with a single
+            # audit entry against seven hundred visits, so the one screen
+            # that exists to prove the system records who did what looked
+            # like it had never been used.
+            db.add(
+                AuditLog(
+                    user_id=worker.worker_id,
+                    action_type="visit.create",
+                    record_id=visit.visit_id,
+                    record_type="visit",
+                    timestamp=created_at,
                 )
             )
 

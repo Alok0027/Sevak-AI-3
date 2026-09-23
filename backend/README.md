@@ -1,8 +1,12 @@
 # SevakAI Backend
 
 FastAPI + LangGraph implementation of the 5-agent pipeline described in the
-SRS (section 5, FR-01 through FR-06). Runs entirely offline with mocked
-Bhashini/LLM/WhatsApp clients until you add real API keys.
+SRS (section 5, FR-01 through FR-06). Every external dependency sits behind
+an interface with both a mock and a real implementation, chosen per-provider
+by environment variable -- so it runs fully offline with no keys, and the
+same code runs live once keys are in. The table below says which is which
+*as currently configured*, because "it's all mocked" stopped being true and
+a stale answer to that question is worse than none.
 
 ## Quick start
 
@@ -11,7 +15,7 @@ cd backend
 python3 -m venv .venv && source .venv/bin/activate     # optional but recommended
 pip install -r requirements.txt
 
-cp .env.example .env          # defaults to USE_MOCKS=true, SQLite -- works with zero setup
+cp -n .env.example .env       # -n: never clobber an .env that already holds real keys
 
 python -m scripts.seed_synthetic_data     # creates demo worker/patient + a random dev dataset
 python -m scripts.demo_pipeline           # runs the SRS section 9 demo scenario end-to-end, prints every agent's output
@@ -38,14 +42,20 @@ Run the test suite: `python -m pytest`
 | Agent 3 referral/WhatsApp/follow-up generation | Real logic, template-based text. Swap point for LLM-drafted local-language text in `app/agents/agent3_action_generation.py`. |
 | Agent 4 HMIS/RCH auto-population + PDF | Real, aggregates actual visit rows. |
 | Agent 5 escalation monitor | Real logic; wire `check_and_escalate()` to a scheduler for production (currently also runs inline on every `GET /escalations/pending`). |
-| Bhashini speech-to-text | **Mocked** (`app/services/bhashini_client.py`). Decodes the base64 payload as UTF-8 text -- see the seed/demo scripts for how the "audio" is faked. |
-| LLM (GPT-4o etc.) | **Mocked** where used (`app/services/llm_client.py`). |
-| WhatsApp Business API | **Mocked** (`app/services/whatsapp_client.py`). |
+| Bhashini speech-to-text | **Selected by `STT_PROVIDER`**, not by `USE_MOCKS`. The committed `.env` and `render.yaml` both set `bhashini`, i.e. the real two-step ULCA flow in `app/services/bhashini_client.py`. `mock` decodes the base64 payload as UTF-8 text (how the seed/demo scripts fake "audio"); `whisper` runs `faster-whisper` locally. **Accuracy has never been measured on any provider** -- see `docs/EVIDENCE.md` section 2 before quoting a number. |
+| LLM | **Selected by `LLM_PROVIDER`.** Both `.env` and `render.yaml` set `real` (Groq, `openai/gpt-oss-120b`). Agents 1 and 2 fall back to their rule-based paths if a call fails or returns malformed JSON; Agent 4 never needed an LLM. |
+| WhatsApp Business API | **Selected by `WHATSAPP_PROVIDER`**: `meta` in both `.env` and `render.yaml`. An explicit `mock` means mock even when `USE_MOCKS=false`; leaving the variable unset keeps the old `USE_MOCKS`-driven behaviour. |
+| Supervisor alerts (FR-03.4 / FR-06.1) | Real logic, **no delivery channel configured**: dispatch is SMS-only by design, and `render.yaml` ships `SMS_PROVIDER=mock`, so alerts are built and left `pending` rather than sent. Set `SMS_PROVIDER=real` with the Twilio credentials to actually page anyone. |
 
-To go live: fill in `.env` (Bhashini + LLM + WhatsApp credentials) and set
-`USE_MOCKS=false`. No other code changes are required -- every service
+Each provider switch is independent, so speech can be live while WhatsApp
+stays mocked. No code changes are required either way -- every service
 module already has a real implementation behind the same interface as its
 mock, selected by `get_*_client(settings)`.
+
+To force everything offline for a rehearsal, set `STT_PROVIDER`,
+`LLM_PROVIDER`, `WHATSAPP_PROVIDER` and `SMS_PROVIDER` to `mock`.
+`scripts/demo_pipeline.py` does this for itself, so it prints the demo
+regardless of what `.env` says.
 
 ## Layout
 

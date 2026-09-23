@@ -43,10 +43,19 @@ def main() -> None:
         n_transcripts = _encrypt_column(conn, "visits", "visit_id", "transcript")
         n_structured = _encrypt_column(conn, "visits", "visit_id", "structured_json")
         n_queue = _encrypt_column(conn, "sync_queue", "queue_id", "record_json")
+        # Agent 3's output and Agent 2's reasoning. A referral letter names
+        # the patient and states why she is being referred; the drivers
+        # quote her readings. Both were plaintext while the transcript they
+        # derive from was encrypted.
+        n_actions = _encrypt_column(conn, "actions", "action_id", "content")
+        n_drivers = _encrypt_column(conn, "risk_flags", "flag_id", "drivers_json")
+        n_overrides = _encrypt_column(conn, "risk_flags", "flag_id", "override_reason")
         conn.commit()
     print(
         f"Encrypted {n_names} patient names, {n_phones} patient phone numbers, "
-        f"{n_transcripts} visit transcripts, {n_structured} structured visit records, {n_queue} queued payloads."
+        f"{n_transcripts} visit transcripts, {n_structured} structured visit records, "
+        f"{n_queue} queued payloads, {n_actions} generated actions, "
+        f"{n_drivers} risk driver sets, {n_overrides} override reasons."
     )
 
 

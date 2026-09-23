@@ -12,6 +12,7 @@ from app.db.models.patient import Patient
 from app.db.models.notification import Notification
 from app.services.notifications import preview
 from app.db.models.audit_log import AuditLog
+from app.services.audit import record_read as audit_read
 
 router = APIRouter(prefix="/api/v1/notifications", tags=["notifications"])
 
@@ -35,6 +36,7 @@ def list_notifications(db: DbSession, user=Depends(require_roles("asha"))):
         Action.type == "whatsapp").order_by(
             case((Action.status == "draft", 0), (Action.status == "needs_review", 1), else_=2),
             Action.created_at.desc()).limit(100).all()
+    audit_read(db, user.worker_id, user.worker_id, "patient_notification", count=len(rows))
     return {"notifications": [{"action_id": a.action_id, "patient": p.name,
         "status": a.status, "content": a.content} for a, v, p in rows]}
 
@@ -43,6 +45,8 @@ def notification_preview(action_id: str, db: DbSession, channel: Literal["sms", 
                          user=Depends(require_roles("asha"))):
     a, v, p = owned(db, action_id, user)
     payload, digest = preview(a, v, p, channel, get_settings())
+    # This one discloses the patient's phone number, not just her name.
+    audit_read(db, user.worker_id, p.patient_id, "patient_contact")
     return {"text": payload["text"], "phone": payload["phone"], "preview_hash": digest, "channel": channel}
 
 @router.post("/{action_id}/approve")

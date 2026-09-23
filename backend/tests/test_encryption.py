@@ -85,3 +85,60 @@ def test_patient_name_is_ciphertext_at_rest_but_plaintext_over_the_api():
         assert row is not None
         assert row[0] != "Meera Patil"
         assert row[0].startswith(_MARKER)
+
+
+def test_referral_letter_and_risk_drivers_are_ciphertext_at_rest():
+    """The conclusion deserves the same protection as the recording.
+
+    `visits.transcript` was encrypted while `actions.content` was not --
+    so the audio's transcription was protected and the referral letter
+    derived from it, which names the patient, her age, her pregnancy stage
+    and the clinical reason she is being referred, sat in plaintext next to
+    it. Same for `risk_flags.drivers_json`, which quotes her actual
+    readings.
+    """
+    from sqlalchemy import text
+
+    from app.db.models.action import Action
+    from app.db.models.risk_flag import RiskFlag
+    from app.db.models.visit import Visit
+    from app.db.session import SessionLocal, engine
+
+    db = SessionLocal()
+    try:
+        visit = Visit(patient_id="p-enc", worker_id="w-enc", risk_level="HIGH")
+        db.add(visit)
+        db.flush()
+        letter = "REFERRAL LETTER\n\nPatient: Meera Patil, Age 28\nReason: BP 140/90"
+        drivers = '[{"observation": "BP 140/90", "reason": "above threshold"}]'
+        db.add(Action(visit_id=visit.visit_id, type="referral", content=letter))
+        db.add(RiskFlag(visit_id=visit.visit_id, risk_level="HIGH",
+                        drivers_json=drivers, override_reason="Cuff was faulty"))
+        db.commit()
+
+        # The ORM hands back exactly what went in.
+        action = db.query(Action).filter(Action.visit_id == visit.visit_id).one()
+        flag = db.query(RiskFlag).filter(RiskFlag.visit_id == visit.visit_id).one()
+        assert action.content == letter
+        assert flag.drivers_json == drivers
+        assert flag.override_reason == "Cuff was faulty"
+
+        # The rows themselves do not.
+        with engine.connect() as conn:
+            raw_action = conn.execute(
+                text("SELECT content FROM actions WHERE visit_id = :v"),
+                {"v": visit.visit_id},
+            ).fetchone()
+            raw_flag = conn.execute(
+                text("SELECT drivers_json, override_reason FROM risk_flags WHERE visit_id = :v"),
+                {"v": visit.visit_id},
+            ).fetchone()
+
+        assert "Meera Patil" not in raw_action[0]
+        assert raw_action[0].startswith(_MARKER)
+        assert "140/90" not in raw_flag[0]
+        assert raw_flag[0].startswith(_MARKER)
+        assert raw_flag[1].startswith(_MARKER)
+    finally:
+        db.rollback()
+        db.close()

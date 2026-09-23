@@ -82,3 +82,51 @@ def test_batch_size_is_bounded():
         assert client.post("/api/v1/sync/batch", headers=headers, json={
             "worker_id": worker_id, "records": [{}] * 101,
         }).status_code == 422
+
+
+def test_reading_a_patient_list_is_audited():
+    """NFR-SC4's other half. Until record_read existed the audit table held
+    writes and logins only, so a supervisor could read every patient record
+    in her district and leave no trace -- and under the DPDP Act access is
+    the event that matters for patient data."""
+    from fastapi.testclient import TestClient
+
+    from app.db.models.audit_log import AuditLog
+    from app.db.session import SessionLocal
+    from app.main import app
+    from scripts.seed_synthetic_data import seed_demo_fixtures
+
+    with TestClient(app) as client:
+        db = SessionLocal()
+        try:
+            seed_demo_fixtures(db)
+        finally:
+            db.close()
+
+        login = client.post("/api/v1/auth/login", json={"phone": "9999999999", "pin": "1234"})
+        asha = login.json()
+        headers = {"Authorization": f"Bearer {asha['access_token']}"}
+
+        db = SessionLocal()
+        try:
+            before = db.query(AuditLog).filter(AuditLog.action_type == "patient.read").count()
+        finally:
+            db.close()
+
+        resp = client.get(f"/api/v1/patients/{asha['worker_id']}", headers=headers)
+        assert resp.status_code == 200, resp.text
+
+        db = SessionLocal()
+        try:
+            entries = (
+                db.query(AuditLog)
+                .filter(AuditLog.action_type == "patient.read")
+                .order_by(AuditLog.timestamp.desc())
+                .all()
+            )
+            assert len(entries) > before, "a patient list read left no trace"
+            # "opened one record" and "listed four hundred" have to be
+            # distinguishable after the fact.
+            assert "count" in (entries[0].details or "")
+        finally:
+            db.close()
