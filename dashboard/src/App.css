@@ -1477,6 +1477,33 @@ table.data td.drivers {
   font-size: 13.5px;
 }
 
+/* The single resolve action, sitting with the patient's identity block
+   rather than repeated down her timeline. Pushed to the right edge so it
+   reads as an action on the person named to its left. */
+.detail-id .btn-resolve {
+  margin-left: auto;
+  align-self: center;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.detail-id .btn-resolve:hover {
+  border-color: var(--ink);
+}
+
+/* The note panel opens below the identity block, full width, so a
+   supervisor writing a clinical note is not typing into a sliver. */
+.resolve-panel {
+  margin-bottom: var(--s3);
+}
+
 /* Measurements shown where a visit has no audio to quote. Tabular
    figures so the numbers line up down a timeline of several visits,
    which is how you spot a blood pressure climbing. */

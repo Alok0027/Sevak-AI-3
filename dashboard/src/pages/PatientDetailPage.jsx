@@ -63,7 +63,9 @@ export default function PatientDetailPage() {
   // the backend). Lives ONLY here, on the patient's own record -- the
   // Overview escalation table is read-only triage and has no path into
   // this, by design (see EscalationList).
-  const [resolvingVisitId, setResolvingVisitId] = useState(null);
+  // Resolution is a fact about the patient, not about one row in her
+  // timeline -- so this is a single flag, not a visit id.
+  const [resolving, setResolving] = useState(false);
   const [resolveNote, setResolveNote] = useState("");
   const [resolveError, setResolveError] = useState(null);
   const [resolveSubmitting, setResolveSubmitting] = useState(false);
@@ -80,34 +82,43 @@ export default function PatientDetailPage() {
     setOverrideLevel(RISK_LEVELS.find((l) => l !== visit.risk_level) || "MEDIUM");
     setOverrideReason("");
     setOverrideError(null);
-    setResolvingVisitId(null);
+    setResolving(false);
   }
 
-  function startResolve(e, visit) {
-    e.stopPropagation();
-    setResolvingVisitId(visit.visit_id);
+  function startResolve() {
+    setResolving(true);
     setResolveNote("");
     setResolveError(null);
     setOverridingVisitId(null);
   }
 
-  function cancelResolve(e) {
-    e.stopPropagation();
-    setResolvingVisitId(null);
+  function cancelResolve() {
+    setResolving(false);
     setResolveError(null);
   }
 
-  async function submitResolve(e, visitId) {
-    e.stopPropagation();
+  async function submitResolve(openHighVisits) {
     setResolveSubmitting(true);
     setResolveError(null);
+    const note = resolveNote.trim();
     try {
-      await resolveRisk(visitId, resolveNote);
-      const note = resolveNote.trim();
+      // Every HIGH visit she still has open, closed under one review.
+      //
+      // The API resolves one visit at a time, which is right -- each flag
+      // is its own record and keeps its own note. What was wrong was
+      // making the supervisor do that arithmetic: a woman with three
+      // unresolved HIGH visits got three identical buttons, and clearing
+      // one left the other two sitting in the escalation queue with
+      // nothing on screen saying so. One clinical review of a patient
+      // closes what that review actually covered.
+      for (const v of openHighVisits) {
+        await resolveRisk(v.visit_id, note);
+      }
+      const resolvedIds = new Set(openHighVisits.map((v) => v.visit_id));
       setData((prev) => ({
         ...prev,
         visits: prev.visits.map((v) =>
-          v.visit_id === visitId
+          resolvedIds.has(v.visit_id)
             ? {
                 ...v,
                 risk_resolved: true,
@@ -117,7 +128,7 @@ export default function PatientDetailPage() {
             : v,
         ),
       }));
-      setResolvingVisitId(null);
+      setResolving(false);
     } catch (err) {
       setResolveError(err.response?.data?.detail || "Could not resolve this risk.");
     } finally {
@@ -194,6 +205,9 @@ export default function PatientDetailPage() {
     .join("  ·  ");
 
   const latest = data.visits[0];
+  // Her open high-risk cases -- what a clinical review of this patient
+  // would actually be closing. Newest first, same order as the timeline.
+  const openHighVisits = data.visits.filter((v) => v.risk_level === "HIGH" && !v.risk_resolved);
 
   return (
     <AppShell
@@ -224,7 +238,51 @@ export default function PatientDetailPage() {
             </button>
           </p>
         </div>
+
+        {/* One resolve action, on the person rather than on each visit.
+            Resolving is a statement about this woman -- "I reviewed her,
+            here is what I found" -- so it belongs beside her name, not
+            repeated down a timeline of seven rows. */}
+        {canOverride && openHighVisits.length > 0 && !resolving && (
+          <button className="btn-resolve" onClick={startResolve}>
+            Resolve after clinical review
+          </button>
+        )}
       </div>
+
+      {resolving && (
+        <div className="override-form resolve-panel">
+          <label htmlFor="resolve-note">
+            Clinical review note (required, at least 10 characters, kept in the audit trail)
+          </label>
+          <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+            This does not change any recorded risk classification -- it records that{" "}
+            {data.patient_name.split(" ")[0]}&apos;s case was reviewed and why it is being closed out.
+            {openHighVisits.length > 1 && (
+              <> It closes all {openHighVisits.length} of her open high-risk visits under this one review.</>
+            )}
+          </p>
+          <textarea
+            id="resolve-note"
+            value={resolveNote}
+            onChange={(e) => setResolveNote(e.target.value)}
+            placeholder="e.g. Called her directly, BP retest was normal -- referred her to the PHC as a precaution."
+          />
+          {resolveError && <p className="error">{resolveError}</p>}
+          <div className="override-actions">
+            <button className="btn-quiet" onClick={cancelResolve} disabled={resolveSubmitting}>
+              Cancel
+            </button>
+            <button
+              className="btn-submit"
+              onClick={() => submitResolve(openHighVisits)}
+              disabled={resolveSubmitting || resolveNote.trim().length < 10}
+            >
+              {resolveSubmitting ? "Saving…" : "Save & resolve"}
+            </button>
+          </div>
+        </div>
+      )}
 
       <Section
         title="Registration record"
@@ -261,7 +319,6 @@ export default function PatientDetailPage() {
             {data.visits.map((v) => {
               const isOpen = expanded === v.visit_id;
               const isOverriding = overridingVisitId === v.visit_id;
-              const isResolving = resolvingVisitId === v.visit_id;
               return (
                 <div key={v.visit_id} className={`visit tone-${(v.risk_level || "low").toLowerCase()}`}>
                   <span className="visit-rail" aria-hidden="true" />
@@ -277,14 +334,9 @@ export default function PatientDetailPage() {
                     >
                       <span className="visit-when">{new Date(v.created_at).toLocaleString()}</span>
                       <RiskTag level={v.risk_level} />
-                      {canOverride && !isOverriding && !isResolving && !v.risk_resolved && (
+                      {canOverride && !isOverriding && !v.risk_resolved && (
                         <button className="override-btn" onClick={(e) => startOverride(e, v)}>
                           Override risk
-                        </button>
-                      )}
-                      {canOverride && !isOverriding && !isResolving && v.risk_level === "HIGH" && !v.risk_resolved && (
-                        <button className="override-btn" onClick={(e) => startResolve(e, v)}>
-                          Resolve after clinical review
                         </button>
                       )}
                       {v.extracted && (
@@ -322,37 +374,6 @@ export default function PatientDetailPage() {
                       <div className="human-note">
                         <strong>Resolved after clinical review by {v.resolved_by_name || "a supervisor"}</strong>
                         {v.risk_resolution_note && <div className="muted">“{v.risk_resolution_note}”</div>}
-                      </div>
-                    )}
-
-                    {isResolving && (
-                      <div className="override-form" onClick={(e) => e.stopPropagation()}>
-                        <label htmlFor={`resolve-note-${v.visit_id}`}>
-                          Clinical review note (required, at least 10 characters, kept in the audit trail)
-                        </label>
-                        <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-                          This does not change the recorded risk classification above -- it just records that
-                          the case was reviewed and why it's being closed out.
-                        </p>
-                        <textarea
-                          id={`resolve-note-${v.visit_id}`}
-                          value={resolveNote}
-                          onChange={(e) => setResolveNote(e.target.value)}
-                          placeholder="e.g. Called the patient directly, BP retest was normal -- referred her to the PHC as a precaution."
-                        />
-                        {resolveError && <p className="error">{resolveError}</p>}
-                        <div className="override-actions">
-                          <button className="btn-quiet" onClick={cancelResolve} disabled={resolveSubmitting}>
-                            Cancel
-                          </button>
-                          <button
-                            className="btn-submit"
-                            onClick={(e) => submitResolve(e, v.visit_id)}
-                            disabled={resolveSubmitting || resolveNote.trim().length < 10}
-                          >
-                            {resolveSubmitting ? "Saving…" : "Save & resolve"}
-                          </button>
-                        </div>
                       </div>
                     )}
 
