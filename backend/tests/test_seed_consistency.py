@@ -83,3 +83,71 @@ def test_no_csv_falls_back_to_the_generator(tmp_path, monkeypatch):
     monkeypatch.setattr(seeder, "VITALS_CSV", tmp_path / "absent.csv")
     monkeypatch.setattr(seeder, "_VITALS_ROWS", None)
     assert seeder.make_visit_vitals()["bp_systolic"] > 0
+
+
+def test_seeded_patients_are_demographically_coherent(tmp_path):
+    """A pregnant man discredits every real number on the screen.
+
+    Gender, name and pregnancy were drawn independently, which produced
+    rows like "Mohammed Bose, 39, Male, 2 months pregnant" and "Robert
+    Madan, 65, Female". A reviewer who sees the system assert a pregnant
+    man stops trusting its risk scores, and the risk scores are the part
+    that is actually real.
+    """
+    from app.db.models.patient import Patient
+    from app.db.models.worker import Worker
+    from app.db.session import SessionLocal
+    from scripts.seed_synthetic_data import seed_caseload
+
+    db = SessionLocal()
+    try:
+        worker = Worker(name="Seed Test ASHA", phone="9123400001",
+                        pin_hash="x", role="asha", sub_centre_id="SC-SEED-TEST")
+        db.add(worker)
+        db.flush()
+
+        seed_caseload(db, worker, patients_per_worker=40, months_history=2)
+        db.commit()
+
+        patients = db.query(Patient).filter(Patient.worker_id == worker.worker_id).all()
+        assert patients, "seed produced no patients to check"
+
+        for p in patients:
+            if p.pregnancy_stage:
+                assert p.gender == "female", (
+                    f"{p.name} is recorded as {p.gender} and {p.pregnancy_stage} pregnant"
+                )
+                assert 18 <= p.age <= 45, f"{p.name} is pregnant at age {p.age}"
+    finally:
+        db.rollback()
+        db.close()
+
+
+def test_seeded_visits_carry_no_fabricated_transcript(tmp_path):
+    """The patient timeline renders a transcript as a quotation, so a
+    placeholder string appeared in quote marks on every visit of every
+    patient, as though the ASHA had said it aloud. A visit with no audio
+    has no words to quote -- the readings are shown instead."""
+    from app.db.models.visit import Visit
+    from app.db.models.worker import Worker
+    from app.db.session import SessionLocal
+    from scripts.seed_synthetic_data import seed_caseload
+
+    db = SessionLocal()
+    try:
+        worker = Worker(name="Seed Test ASHA 2", phone="9123400002",
+                        pin_hash="x", role="asha", sub_centre_id="SC-SEED-TEST")
+        db.add(worker)
+        db.flush()
+        seed_caseload(db, worker, patients_per_worker=10, months_history=2)
+        db.commit()
+
+        visits = db.query(Visit).filter(Visit.worker_id == worker.worker_id).all()
+        assert visits, "seed produced no visits to check"
+        for v in visits:
+            assert not v.transcript, f"seeded visit carries a fabricated transcript: {v.transcript!r}"
+            # ...but the readings behind the risk level are still there.
+            assert v.structured_json, "a visit with neither transcript nor readings is an empty row"
+    finally:
+        db.rollback()
+        db.close()

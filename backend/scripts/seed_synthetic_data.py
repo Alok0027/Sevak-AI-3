@@ -270,13 +270,21 @@ def seed_caseload(db, worker, patients_per_worker: int, months_history: int) -> 
     """
     for _ in range(patients_per_worker):
         is_pregnant = random.random() < 0.35
+        # Gender, name and pregnancy have to agree. Drawing them
+        # independently produced "Mohammed Bose, 39, Male, 2 months
+        # pregnant" and "Robert Madan, 65, Female" -- rows that are funny
+        # for about one second and then cost you the credibility of every
+        # other number on the screen, because a reviewer who sees the
+        # system assert a pregnant man stops believing its risk scores.
+        gender = "female" if is_pregnant else random.choice(["female", "male"])
+        name = fake.name_female() if gender == "female" else fake.name_male()
         village = random.choice(VILLAGES)
         phone = fake.numerify("9#########")
         patient = Patient(
             worker_id=worker.worker_id,
-            name=fake.name(),
+            name=name,
             age=random.randint(18, 45) if is_pregnant else random.randint(1, 70),
-            gender=random.choice(["female", "male"]),
+            gender=gender,
             village=village,
             # Set here rather than left to the startup backfill, so a
             # freshly seeded database is already in the shape the app
@@ -329,7 +337,20 @@ def seed_caseload(db, worker, patients_per_worker: int, months_history: int) -> 
             visit = Visit(
                 patient_id=patient.patient_id,
                 worker_id=worker.worker_id,
-                transcript="[synthetic historical visit -- audio not retained]",
+                # No transcript, rather than a fabricated one.
+                #
+                # This used to read "[synthetic historical visit -- audio
+                # not retained]", and the patient timeline renders a
+                # transcript as a quotation -- so every visit of every
+                # patient displayed that bracketed note in quote marks, as
+                # though the ASHA had said it out loud. Writing plausible
+                # fake speech instead would be worse: it would put words
+                # in a health worker's mouth that no one ever said.
+                #
+                # The readings *are* real data and are on the record
+                # already (structured_json below), so the timeline shows
+                # those instead when there is no audio.
+                transcript=None,
                 structured_json=extracted.model_dump_json(),
                 risk_score=result.risk_score,
                 risk_level=risk_level,

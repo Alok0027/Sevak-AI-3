@@ -1477,6 +1477,16 @@ table.data td.drivers {
   font-size: 13.5px;
 }
 
+/* Measurements shown where a visit has no audio to quote. Tabular
+   figures so the numbers line up down a timeline of several visits,
+   which is how you spot a blood pressure climbing. */
+.readings {
+  margin-top: var(--s1);
+  color: var(--slate);
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+}
+
 .expand-hint {
   color: var(--slate);
   font-size: 11.5px;

@@ -20,6 +20,23 @@ const RISK_LEVELS = ["HIGH", "MEDIUM", "LOW"];
  * That is the one accent in the system and it is never used for
  * decoration, so a supervisor can tell AI output from human judgment
  * without a legend. */
+// The readings worth seeing at a glance on a timeline row. Deliberately
+// short: the full extracted record is one click away behind "Full record",
+// and a timeline that prints every field stops being scannable.
+function summariseReadings(extracted) {
+  if (!extracted) return "";
+  const parts = [];
+  if (extracted.bp_systolic && extracted.bp_diastolic) {
+    parts.push(`BP ${extracted.bp_systolic}/${extracted.bp_diastolic}`);
+  }
+  if (extracted.temperature_c) parts.push(`${extracted.temperature_c}\u00B0C`);
+  if (extracted.blood_sugar_random) parts.push(`Sugar ${extracted.blood_sugar_random} mg/dL`);
+  if (extracted.blood_sugar_fasting) parts.push(`Fasting ${extracted.blood_sugar_fasting} mg/dL`);
+  if (extracted.weight_kg) parts.push(`${extracted.weight_kg} kg`);
+  if (extracted.medication_compliance === "non_compliant") parts.push("medication missed");
+  return parts.join(" \u00B7 ");
+}
+
 export default function PatientDetailPage() {
   const { patientId } = useParams();
   const navigate = useNavigate();
@@ -281,6 +298,15 @@ export default function PatientDetailPage() {
                         as heard, never translated. Hind's Devanagari cut
                         is loaded so it sets properly. */}
                     {v.transcript && <p className="transcript">“{v.transcript}”</p>}
+
+                    {/* A visit with no audio -- a historical record
+                        entered before this system, or a seeded one -- has
+                        no words to quote. Show what was actually measured
+                        instead of an empty row, and never invent a quote
+                        to fill the space. */}
+                    {!v.transcript && summariseReadings(v.extracted) && (
+                      <p className="readings">{summariseReadings(v.extracted)}</p>
+                    )}
 
                     {v.risk_overridden && (
                       <div className="human-note">
