@@ -1466,9 +1466,26 @@ table.data td.drivers {
   cursor: pointer;
 }
 
+/* A fixed column for the timestamp.
+   `font-variant-numeric: tabular-nums` is requested and kept, but it is
+   not enough on its own: Hind does not ship the `tnum` feature, so the
+   digits stay proportional and the same-length dates still measured
+   121.6px to 126.1px -- a 4.5px spread that every button after them
+   inherited. The min-width is what actually holds the column; the
+   tabular request is there for the day the typeface gains it. */
 .visit-when {
   font-weight: 600;
   font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+  min-width: 132px;
+}
+
+/* A fixed column for the severity, wide enough for the longest label
+   ("NOT ASSESSED"). Without it the tag is as wide as its word -- LOW,
+   MEDIUM, HIGH all differ -- so the button after it started at a
+   different x on every row, which is what made the timeline look ragged. */
+.visit-head .risk-tag {
+  min-width: 92px;
 }
 
 .transcript {
@@ -1480,22 +1497,29 @@ table.data td.drivers {
 /* The single resolve action, sitting with the patient's identity block
    rather than repeated down her timeline. Pushed to the right edge so it
    reads as an action on the person named to its left. */
+/* Same palette as the Back button (.btn-quiet): surface fill, hairline
+   border, ink text, and the sage/forest hover. This is a considered
+   action a supervisor takes rarely, not a primary call to action, so it
+   should sit as quietly as Back does. */
 .detail-id .btn-resolve {
   margin-left: auto;
   align-self: center;
   padding: 8px 14px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
   color: var(--ink);
   font: inherit;
   font-size: 13.5px;
   font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.detail-id .btn-resolve:hover {
-  border-color: var(--ink);
+.detail-id .btn-resolve:not(:disabled):hover {
+  background: var(--sage);
+  border-color: var(--forest);
+  color: var(--forest);
 }
 
 /* The note panel opens below the identity block, full width, so a
@@ -1563,6 +1587,11 @@ table.data td.drivers {
   color: var(--indigo);
 }
 
+/* No `margin-left: auto` here on purpose. `.expand-hint` already claims
+   the free space to sit at the right edge; a second auto margin split
+   that space between the two, so this button floated to a different
+   position depending on how wide the risk tag beside it happened to be.
+   It now sits in the flow, at the same x on every row. */
 .override-btn {
   background: none;
   border: 1px solid var(--hairline);
@@ -1570,7 +1599,7 @@ table.data td.drivers {
   padding: 4px 10px;
   font-size: 12px;
   border-radius: var(--pill);
-  margin-left: auto;
+  white-space: nowrap;
 }
 
 .override-btn:not(:disabled):hover {
