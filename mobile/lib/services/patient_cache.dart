@@ -49,7 +49,23 @@ class PatientCache {
         )
       '''),
     );
-    await opened.execute('PRAGMA secure_delete = ON');
+    // rawQuery, not execute, and never fatal.
+    //
+    // `PRAGMA secure_delete = ON` *returns* the value it set, which makes
+    // it a query. Android's SQLiteDatabase refuses a returning statement
+    // through execSQL and throws "Queries can be performed using
+    // SQLiteDatabase query or rawQuery methods only". sqflite_ffi -- what
+    // the tests and the emulator use -- allows it, so this passed every
+    // test and failed on the first real handset.
+    //
+    // Wrapped because secure_delete is hardening, not function: it makes
+    // deleted rows unrecoverable from the file. If a device or a SQLite
+    // build will not do it, an ASHA must still be able to record a visit.
+    try {
+      await opened.rawQuery('PRAGMA secure_delete = ON');
+    } catch (_) {
+      // Continue without it rather than refusing to open the database.
+    }
     _db = opened;
     return opened;
   }
