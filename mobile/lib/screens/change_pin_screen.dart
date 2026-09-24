@@ -67,7 +67,7 @@ class _ChangePinScreenState extends State<ChangePinScreen> {
       setState(() => _error = e.status == 403 ? wrongPin : e.message);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = '$e');
+      setState(() => _error = readableError(e));
     } finally {
       if (mounted) setState(() => _saving = false);
     }

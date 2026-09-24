@@ -141,7 +141,7 @@ class _VoiceRecordScreenState extends State<VoiceRecordScreen> {
       // hardware, browser blocking access, etc).
       if (!mounted) return;
       setState(() => _isRecording = false);
-      _showError('$startFailed: $e');
+      _showError('$startFailed: ${readableError(e)}');
     }
   }
 

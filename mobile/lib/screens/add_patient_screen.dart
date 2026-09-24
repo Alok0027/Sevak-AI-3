@@ -132,7 +132,7 @@ class _AddPatientScreenState extends State<AddPatientScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _isRecording = false);
-      _showError('$startFailed: $e');
+      _showError('$startFailed: ${readableError(e)}');
     }
   }
 
@@ -142,8 +142,27 @@ class _AddPatientScreenState extends State<AddPatientScreen> {
     String processFailed,
     String heardNothing,
   ) async {
+    final needsInternet = tr(context, 'voiceNeedsInternet');
     setState(() => _isProcessingVoice = true);
     try {
+      // Speech recognition happens on the server, so this one button
+      // genuinely cannot work without a signal -- unlike recording a
+      // visit, which queues the audio and transcribes it on sync.
+      //
+      // Checked before the call rather than caught after it, because the
+      // failure otherwise arrives as "Failed host lookup ... errno = 7"
+      // in a red banner, which tells an ASHA nothing about what to do
+      // next. What she needs to know is: type it instead.
+      final connectivity = await Connectivity().checkConnectivity();
+      if (connectivity.contains(ConnectivityResult.none)) {
+        if (mounted) {
+          setState(() => _isProcessingVoice = false);
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(needsInternet)));
+        }
+        return;
+      }
+
       final bytes = await File(path).readAsBytes();
       final audioBase64 = base64Encode(bytes);
       final result = await widget.api.voiceIntake(audioBase64: audioBase64, languageCode: languageCode);
@@ -171,7 +190,7 @@ class _AddPatientScreenState extends State<AddPatientScreen> {
       final gotNothing = extracted.values.every((v) => v == null || v is Map && v.isEmpty);
       if (gotNothing) _showError(heardNothing);
     } catch (e) {
-      if (mounted) _showError('$processFailed: $e');
+      if (mounted) _showError('$processFailed: ${readableError(e)}');
     } finally {
       if (mounted) setState(() => _isProcessingVoice = false);
     }
@@ -252,7 +271,7 @@ class _AddPatientScreenState extends State<AddPatientScreen> {
         Navigator.of(context).pop(local);
         return;
       } catch (_) {
-        if (mounted) setState(() => _error = e.toString());
+        if (mounted) setState(() => _error = readableError(e));
       }
     } finally {
       if (mounted) setState(() => _saving = false);

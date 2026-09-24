@@ -552,6 +552,31 @@ class ApiClient {
   }
 }
 
+/// A failed request, in words an ASHA can act on.
+///
+/// `e.toString()` on a network failure produces things like
+/// "ClientException with SocketException: Failed host lookup:
+/// 'sevakai-api.onrender.com' (OS Error: No address associated with
+/// hostname, errno = 7)". That is a useful line in a bug report and a
+/// useless one on a phone at a doorstep: it does not say whether the
+/// problem is her signal or our server, and it does not say what to do.
+///
+/// Kept here rather than in one screen because every screen that makes a
+/// request needs it, and each one inventing its own wording is how an app
+/// ends up speaking four different languages about the same failure.
+String readableError(Object e) {
+  if (e is ApiException) return e.message;
+  final text = e.toString();
+  if (text.contains('SocketException') ||
+      text.contains('ClientException') ||
+      text.contains('TimeoutException') ||
+      text.contains('Failed host lookup')) {
+    return 'No connection to the server. Check your internet — if it has '
+        'been idle a while, it may take a minute to wake up.';
+  }
+  return 'Something went wrong. Please try again.';
+}
+
 class ApiException implements Exception {
   final String message;
 

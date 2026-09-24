@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:async';
 import 'package:flutter/material.dart';
 
@@ -60,31 +59,14 @@ class _LoginScreenState extends State<LoginScreen> {
         MaterialPageRoute(builder: (_) => RootShell(api: widget.api, session: session)),
       );
     } catch (e) {
-      setState(() => _error = _readable(e));
+      setState(() => _error = readableError(e));
     } finally {
       _wakeNotice?.cancel();
       if (mounted) setState(() { _loading = false; _waking = false; });
     }
   }
 
-  /// A sentence she can act on, not a Dart exception.
-  ///
-  /// `e.toString()` on a failed request produces
-  /// "ClientException with SocketException: Connection timed out ..." --
-  /// which tells an ASHA nothing, and tells her nothing at the one moment
-  /// she most needs to know whether the problem is her phone or ours.
-  String _readable(Object e) {
-    if (e is ApiException) return e.message;
-    final text = e.toString();
-    if (e is TimeoutException ||
-        e is SocketException ||
-        text.contains('SocketException') ||
-        text.contains('ClientException')) {
-      return 'Could not reach the server. Check your connection and try again '
-          '— if it has been idle a while, it may take a minute to wake up.';
-    }
-    return 'Something went wrong. Please try again.';
-  }
+
 
   @override
   Widget build(BuildContext context) {

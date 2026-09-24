@@ -177,6 +177,11 @@ class AppStrings {
     'risk': 'RISK',
     'generatedActions': 'Generated actions',
     'offlineSaved': 'Offline — saved locally, will sync automatically when connected.',
+    // Speech recognition runs on the server, so this is the one button
+    // that genuinely needs a signal. Recording a visit does not -- that
+    // queues and transcribes on sync -- so the wording has to point her
+    // at the way through rather than just say no.
+    'voiceNeedsInternet': 'Voice needs internet. Please type the details instead.',
     // Shown above the patient list when it came off the phone rather
     // than the server. She needs to know the risk badges may be stale,
     // without being told anything is broken -- nothing is.
@@ -462,6 +467,7 @@ class AppStrings {
     'risk': 'जोखिम',
     'generatedActions': 'तय किए गए कार्य',
     'offlineSaved': 'ऑफ़लाइन — फ़ोन में सहेजा गया, नेटवर्क आते ही अपने आप भेज दिया जाएगा।',
+    'voiceNeedsInternet': 'बोलकर भरने के लिए इंटरनेट चाहिए। कृपया जानकारी टाइप करें।',
     'showingSavedList': 'ऑफ़लाइन — सहेजी गई सूची दिख रही है। नेटवर्क आते ही अपडेट हो जाएगी।',
     'couldNotReachServer': 'सर्वर से संपर्क नहीं हुआ — फ़ोन में सहेजा गया, दोबारा कोशिश होगी।',
     'transcriptEmpty': 'कुछ लिखा नहीं गया — दोबारा रिकॉर्ड करें, या हाथ से लिखें।',
@@ -741,6 +747,7 @@ class AppStrings {
     'risk': 'धोका',
     'generatedActions': 'ठरवलेली कामे',
     'offlineSaved': 'ऑफलाइन — फोनमध्ये जतन केले, नेटवर्क आल्यावर आपोआप पाठवले जाईल.',
+    'voiceNeedsInternet': 'बोलून भरण्यासाठी इंटरनेट आवश्यक आहे. कृपया माहिती टाइप करा.',
     'showingSavedList': 'ऑफलाइन — जतन केलेली यादी दिसत आहे. नेटवर्क आल्यावर अपडेट होईल.',
     'couldNotReachServer': 'सर्व्हरशी संपर्क झाला नाही — फोनमध्ये जतन केले, पुन्हा प्रयत्न होईल.',
     'transcriptEmpty': 'काही लिहिलेले नाही — पुन्हा रेकॉर्ड करा, किंवा हाताने लिहा.',
@@ -1020,6 +1027,7 @@ class AppStrings {
     'risk': 'ஆபத்து',
     'generatedActions': 'நிர்ணயிக்கப்பட்ட பணிகள்',
     'offlineSaved': 'ஆஃப்லைன் — தொலைபேசியில் சேமிக்கப்பட்டது, இணைப்பு வந்ததும் தானாக அனுப்பப்படும்.',
+    'voiceNeedsInternet': 'குரல் மூலம் நிரப்ப இணையம் தேவை. விவரங்களைத் தட்டச்சு செய்யவும்.',
     'showingSavedList': 'ஆஃப்லைன் — சேமித்த பட்டியல் காட்டப்படுகிறது. இணைப்பு வந்ததும் புதுப்பிக்கப்படும்.',
     'couldNotReachServer': 'சேவையகத்தைத் தொடர்பு கொள்ள முடியவில்லை — தொலைபேசியில் சேமிக்கப்பட்டது, மீண்டும் முயற்சிக்கப்படும்.',
     'transcriptEmpty': 'எதுவும் எழுதப்படவில்லை — மீண்டும் பதிவு செய்யவும், அல்லது கையால் எழுதவும்.',
@@ -1299,6 +1307,7 @@ class AppStrings {
     'risk': 'ప్రమాదం',
     'generatedActions': 'నిర్ణయించిన పనులు',
     'offlineSaved': 'ఆఫ్‌లైన్ — ఫోన్‌లో సేవ్ అయింది, నెట్‌వర్క్ రాగానే వాటంతట అదే పంపబడుతుంది.',
+    'voiceNeedsInternet': 'వాయిస్‌కు ఇంటర్నెట్ అవసరం. దయచేసి వివరాలు టైప్ చేయండి.',
     'showingSavedList': 'ఆఫ్‌లైన్ — సేవ్ చేసిన జాబితా చూపబడుతోంది. నెట్‌వర్క్ రాగానే అప్‌డేట్ అవుతుంది.',
     'couldNotReachServer': 'సర్వర్‌ను చేరుకోలేకపోయాం — ఫోన్‌లో సేవ్ అయింది, మళ్లీ ప్రయత్నిస్తుంది.',
     'transcriptEmpty': 'ఏమీ రాయలేదు — మళ్లీ రికార్డ్ చేయండి, లేదా చేతితో రాయండి.',
@@ -1578,6 +1587,7 @@ class AppStrings {
     'risk': 'ঝুঁকি',
     'generatedActions': 'নির্ধারিত কাজ',
     'offlineSaved': 'অফলাইন — ফোনে সংরক্ষিত, নেটওয়ার্ক এলে নিজে থেকেই পাঠানো হবে।',
+    'voiceNeedsInternet': 'ভয়েসের জন্য ইন্টারনেট দরকার। অনুগ্রহ করে তথ্য টাইপ করুন।',
     'showingSavedList': 'অফলাইন — সংরক্ষিত তালিকা দেখানো হচ্ছে। নেটওয়ার্ক এলে আপডেট হবে।',
     'couldNotReachServer': 'সার্ভারে পৌঁছনো যায়নি — ফোনে সংরক্ষিত, আবার চেষ্টা হবে।',
     'transcriptEmpty': 'কিছু লেখা হয়নি — আবার রেকর্ড করুন, বা হাতে লিখুন।',

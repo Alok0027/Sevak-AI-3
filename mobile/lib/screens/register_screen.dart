@@ -96,7 +96,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       setState(() => _error = e.status == 409 ? taken : e.message);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = '$e');
+      setState(() => _error = readableError(e));
     } finally {
       if (mounted) setState(() => _sending = false);
     }

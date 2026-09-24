@@ -180,7 +180,7 @@ class _RootShellState extends State<RootShell> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${tr(context, 'syncFailed')}: $e')),
+        SnackBar(content: Text('${tr(context, 'syncFailed')}: ${readableError(e)}')),
       );
     } finally {
       if (mounted) setState(() => _syncing = false);

@@ -81,7 +81,7 @@ class _TaskListScreenState extends State<TaskListScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${tr(context, 'failed')}: $e')),
+        SnackBar(content: Text('${tr(context, 'failed')}: ${readableError(e)}')),
       );
     } finally {
       if (mounted) setState(() => _completing.remove(actionId));
