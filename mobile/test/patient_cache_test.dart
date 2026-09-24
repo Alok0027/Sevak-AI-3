@@ -15,7 +15,15 @@ void main() {
 
   late Directory directory;
 
-  setUp(() async {
+  // One directory for the whole file, not one per test.
+  //
+  // PatientCache holds its database open in a static field, which is right
+  // for an app -- one handle for its lifetime -- and means a fresh temp
+  // directory per test leaves that handle pointing at the previous one.
+  // The cache then writes to the old file while the assertions read a new
+  // empty one, and two tests fail for a reason that has nothing to do with
+  // the code under test.
+  setUpAll(() async {
     FlutterSecureStorage.setMockInitialValues({});
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
@@ -23,8 +31,26 @@ void main() {
     await databaseFactory.setDatabasesPath(directory.path);
   });
 
+  setUp(() async {
+    await PatientCache.clear();
+  });
+
   String body(List<Map<String, dynamic>> patients) =>
       jsonEncode({'patients': patients, 'attention_count': 0});
+
+  /// A second handle on the same file, for looking at what was actually
+  /// written.
+  ///
+  /// `singleInstance: false` is the whole point. sqflite hands back the
+  /// *same* Database object for a path by default, so a plain
+  /// openDatabase here returns PatientCache's own handle -- and closing it
+  /// after the check closed the cache's database for every test that
+  /// followed. Five tests failed on "database_closed" for a reason that
+  /// had nothing to do with them.
+  Future<Database> inspect() => openDatabase(
+        '${directory.path}/sevakai_cache.db',
+        options: OpenDatabaseOptions(singleInstance: false),
+      );
 
   test('a saved list comes back after the network is gone', () async {
     await PatientCache.save(
@@ -52,7 +78,7 @@ void main() {
     await PatientCache.save('worker-1',
         body([{'id': 'p1', 'name': 'Meera Patil', 'total_visits': 0}]));
 
-    final db = await openDatabase('${directory.path}/sevakai_cache.db');
+    final db = await inspect();
     final raw = (await db.query('patient_list')).single['payload'] as String;
     await db.close();
 
@@ -88,7 +114,7 @@ void main() {
   test('an unreadable row is treated as no cache rather than crashing', () async {
     await PatientCache.save('worker-1',
         body([{'id': 'p1', 'name': 'Meera Patil', 'total_visits': 0}]));
-    final db = await openDatabase('${directory.path}/sevakai_cache.db');
+    final db = await inspect();
     await db.update('patient_list', {'payload': 'enc1:not-actually-ciphertext'});
     await db.close();
 
