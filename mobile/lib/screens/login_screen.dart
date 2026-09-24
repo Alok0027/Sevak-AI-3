@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../l10n/app_strings.dart';
@@ -20,11 +22,29 @@ class _LoginScreenState extends State<LoginScreen> {
   final _pinController = TextEditingController(text: '1234');
   bool _loading = false;
   String? _error;
+  bool _waking = false;
+  Timer? _wakeNotice;
+
+  @override
+  void dispose() {
+    // Without this the timer fires into a disposed widget when she backs
+    // out mid-login, and setState throws after unmount.
+    _wakeNotice?.cancel();
+    super.dispose();
+  }
 
   Future<void> _login() async {
     setState(() {
       _loading = true;
       _error = null;
+      _waking = false;
+    });
+    // The backend sleeps on its host's free tier and takes the better part
+    // of a minute to wake. Signing in over that gap looks identical to a
+    // frozen app, so after a few seconds say what is actually happening
+    // rather than leaving her watching a spinner.
+    _wakeNotice = Timer(const Duration(seconds: 4), () {
+      if (mounted && _loading) setState(() => _waking = true);
     });
     try {
       final result = await widget.api.login(_phoneController.text.trim(), _pinController.text.trim());
@@ -40,10 +60,30 @@ class _LoginScreenState extends State<LoginScreen> {
         MaterialPageRoute(builder: (_) => RootShell(api: widget.api, session: session)),
       );
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() => _error = _readable(e));
     } finally {
-      if (mounted) setState(() => _loading = false);
+      _wakeNotice?.cancel();
+      if (mounted) setState(() { _loading = false; _waking = false; });
     }
+  }
+
+  /// A sentence she can act on, not a Dart exception.
+  ///
+  /// `e.toString()` on a failed request produces
+  /// "ClientException with SocketException: Connection timed out ..." --
+  /// which tells an ASHA nothing, and tells her nothing at the one moment
+  /// she most needs to know whether the problem is her phone or ours.
+  String _readable(Object e) {
+    if (e is ApiException) return e.message;
+    final text = e.toString();
+    if (e is TimeoutException ||
+        e is SocketException ||
+        text.contains('SocketException') ||
+        text.contains('ClientException')) {
+      return 'Could not reach the server. Check your connection and try again '
+          '— if it has been idle a while, it may take a minute to wake up.';
+    }
+    return 'Something went wrong. Please try again.';
   }
 
   @override
@@ -111,6 +151,15 @@ class _LoginScreenState extends State<LoginScreen> {
                 onSubmitted: (_) => _loading ? null : _login(),
               ),
               const SizedBox(height: 20),
+              if (_waking && _error == null)
+                const Padding(
+                  padding: EdgeInsets.only(top: 12),
+                  child: Text(
+                    'Waking the server, please wait…',
+                    style: TextStyle(fontSize: 13, color: Colors.black54),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
               if (_error != null)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),

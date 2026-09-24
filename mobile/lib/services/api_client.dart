@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
@@ -38,23 +39,65 @@ class ApiClient {
 
   ApiClient({String? baseUrl}) : baseUrl = baseUrl ?? _defaultBaseUrl;
 
+  /// How long to wait before deciding the server is not coming.
+  ///
+  /// Ninety seconds looks absurd next to a normal API call, and it is the
+  /// right number here: the backend sleeps after fifteen minutes idle on
+  /// its host's free tier and takes the better part of a minute to wake.
+  /// With no timeout at all -- which is what `package:http` does by
+  /// default -- Android eventually tears the socket down itself and the
+  /// app surfaces a ClientException wrapping a SocketException. An ASHA
+  /// sees a crash where the truthful answer was "the server is starting".
+  static const _timeout = Duration(seconds: 90);
+
+  /// One retry, then give up.
+  ///
+  /// The first request to a sleeping server is the one that wakes it and
+  /// the one most likely to die on the way; by the second attempt the
+  /// server is usually up. Retrying more than once would just delay an
+  /// honest error message on a phone that genuinely has no signal.
+  Future<http.Response> _send(Future<http.Response> Function() call) async {
+    try {
+      return await call().timeout(_timeout);
+    } on TimeoutException {
+      return await call().timeout(_timeout);
+    } on SocketException {
+      return await call().timeout(_timeout);
+    } on http.ClientException {
+      // Android reports a torn-down socket this way rather than as a
+      // SocketException, so both have to be caught or the retry never
+      // happens on the platform that needs it.
+      return await call().timeout(_timeout);
+    }
+  }
+
+  Future<http.Response> _get(Uri url, {Map<String, String>? headers}) =>
+      _send(() => http.get(url, headers: headers));
+
+  Future<http.Response> _post(Uri url, {Map<String, String>? headers, Object? body}) =>
+      _send(() => http.post(url, headers: headers, body: body));
+
+  Future<http.Response> _delete(Uri url, {Map<String, String>? headers}) =>
+      _send(() => http.delete(url, headers: headers));
+
+
   void setToken(String token) => _token = token;
   void clearToken() => _token = null;
 
   Future<List<dynamic>> notificationInbox() async {
-    final response = await http.get(Uri.parse('$baseUrl/api/v1/notifications'), headers: _headers);
+    final response = await _get(Uri.parse('$baseUrl/api/v1/notifications'), headers: _headers);
     if (response.statusCode != 200) throw ApiException('Could not load notifications');
     return jsonDecode(response.body)['notifications'] as List<dynamic>;
   }
 
   Future<Map<String, dynamic>> notificationPreview(String id, String channel) async {
-    final response = await http.get(Uri.parse('$baseUrl/api/v1/notifications/$id/preview?channel=$channel'), headers: _headers);
+    final response = await _get(Uri.parse('$baseUrl/api/v1/notifications/$id/preview?channel=$channel'), headers: _headers);
     if (response.statusCode != 200) throw ApiException(response.body);
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
   Future<void> approveNotification(String id, String channel, String previewHash) async {
-    final response = await http.post(Uri.parse('$baseUrl/api/v1/notifications/$id/approve'), headers: _headers,
+    final response = await _post(Uri.parse('$baseUrl/api/v1/notifications/$id/approve'), headers: _headers,
         body: jsonEncode({'channel': channel, 'preview_hash': previewHash, 'consent_confirmed': true}));
     if (response.statusCode != 200) throw ApiException(response.body);
   }
@@ -65,7 +108,7 @@ class ApiClient {
       };
 
   Future<Map<String, dynamic>> login(String phone, String pin) async {
-    final resp = await http.post(
+    final resp = await _post(
       Uri.parse('$baseUrl/api/v1/auth/login'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'phone': phone, 'pin': pin}),
@@ -82,7 +125,7 @@ class ApiClient {
 
   /// Her own record: code, sub-centre, counts, and any leave arranged.
   Future<Map<String, dynamic>> fetchMyProfile() async {
-    final resp = await http.get(Uri.parse('$baseUrl/api/v1/workers/me'), headers: _headers);
+    final resp = await _get(Uri.parse('$baseUrl/api/v1/workers/me'), headers: _headers);
     if (resp.statusCode != 200) {
       throw ApiException(_detail(resp.body) ?? 'Failed to load profile', status: resp.statusCode);
     }
@@ -92,7 +135,7 @@ class ApiClient {
   /// The other ASHAs in her sub-centre -- the people who could cover for
   /// her. Names and codes only; a peer is not owed a staff directory.
   Future<List<Map<String, dynamic>>> fetchColleagues() async {
-    final resp = await http.get(Uri.parse('$baseUrl/api/v1/workers/colleagues'), headers: _headers);
+    final resp = await _get(Uri.parse('$baseUrl/api/v1/workers/colleagues'), headers: _headers);
     if (resp.statusCode != 200) {
       throw ApiException(_detail(resp.body) ?? 'Failed to load colleagues', status: resp.statusCode);
     }
@@ -110,7 +153,7 @@ class ApiClient {
     String? reason,
   }) async {
     String day(DateTime d) => d.toIso8601String().split('T').first;
-    final resp = await http.post(
+    final resp = await _post(
       Uri.parse('$baseUrl/api/v1/workers/me/absence'),
       headers: _headers,
       body: jsonEncode({
@@ -128,7 +171,7 @@ class ApiClient {
 
   /// She is back early.
   Future<void> endLeave(String absenceId) async {
-    final resp = await http.delete(
+    final resp = await _delete(
       Uri.parse('$baseUrl/api/v1/workers/me/absence/$absenceId'),
       headers: _headers,
     );
@@ -147,7 +190,7 @@ class ApiClient {
     String? subCentreId,
     String languagePref = 'hi',
   }) async {
-    final resp = await http.post(
+    final resp = await _post(
       Uri.parse('$baseUrl/api/v1/auth/register'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
@@ -168,7 +211,7 @@ class ApiClient {
   /// Change your own PIN. The current one is required, so an unlocked
   /// phone left on a table is not an account takeover.
   Future<void> changePin({required String currentPin, required String newPin}) async {
-    final resp = await http.post(
+    final resp = await _post(
       Uri.parse('$baseUrl/api/v1/auth/change-pin'),
       headers: _headers,
       body: jsonEncode({'current_pin': currentPin, 'new_pin': newPin}),
@@ -196,7 +239,7 @@ class ApiClient {
   /// something the worker should ever be shown: the token she already holds
   /// is still valid until it isn't, and the next start will try again.
   Future<Map<String, dynamic>> refreshToken() async {
-    final resp = await http.post(Uri.parse('$baseUrl/api/v1/auth/refresh'), headers: _headers);
+    final resp = await _post(Uri.parse('$baseUrl/api/v1/auth/refresh'), headers: _headers);
     if (resp.statusCode != 200) {
       throw ApiException('Refresh failed: ${resp.body}');
     }
@@ -209,7 +252,7 @@ class ApiClient {
   /// Server-side rather than baked into the app, because the ANM covering
   /// a sub-centre changes and a number shipped in a release goes stale.
   Future<List<Map<String, dynamic>>> fetchSupportContacts() async {
-    final resp = await http.get(Uri.parse('$baseUrl/api/v1/support/contacts'), headers: _headers);
+    final resp = await _get(Uri.parse('$baseUrl/api/v1/support/contacts'), headers: _headers);
     if (resp.statusCode != 200) {
       throw ApiException('Failed to load contacts: ${resp.body}');
     }
@@ -227,7 +270,7 @@ class ApiClient {
     String? deviceInfo,
     String? language,
   }) async {
-    final resp = await http.post(
+    final resp = await _post(
       Uri.parse('$baseUrl/api/v1/support/tickets'),
       headers: _headers,
       body: jsonEncode({
@@ -247,7 +290,7 @@ class ApiClient {
   /// What she has reported, and whether anybody answered. Without this the
   /// Help screen is a suggestion box with no bottom.
   Future<List<Map<String, dynamic>>> fetchMyReports() async {
-    final resp = await http.get(
+    final resp = await _get(
       Uri.parse('$baseUrl/api/v1/support/tickets/mine'),
       headers: _headers,
     );
@@ -274,7 +317,7 @@ class ApiClient {
     int? bloodSugarFasting,
     int? bloodSugarRandom,
   }) async {
-    final resp = await http.post(
+    final resp = await _post(
       Uri.parse('$baseUrl/api/v1/patients'),
       headers: _headers,
       body: jsonEncode({
@@ -311,7 +354,7 @@ class ApiClient {
     required String audioBase64,
     required String languageCode,
   }) async {
-    final resp = await http.post(
+    final resp = await _post(
       Uri.parse('$baseUrl/api/v1/patients/voice-intake'),
       headers: _headers,
       body: jsonEncode({'audio_base64': audioBase64, 'language_code': languageCode}),
@@ -323,7 +366,7 @@ class ApiClient {
   }
 
   Future<List<Patient>> fetchPatients(String workerId) async {
-    final resp = await http.get(Uri.parse('$baseUrl/api/v1/patients/$workerId'), headers: _headers);
+    final resp = await _get(Uri.parse('$baseUrl/api/v1/patients/$workerId'), headers: _headers);
     if (resp.statusCode != 200) {
       throw ApiException('Failed to load patients: ${resp.body}');
     }
@@ -340,7 +383,7 @@ class ApiClient {
   /// pipeline, so it can be shown to the ASHA for review/correction before
   /// anything downstream (risk scoring, referral drafting) happens.
   Future<String> transcribeAudio({required String audioBase64, required String languageCode}) async {
-    final resp = await http.post(
+    final resp = await _post(
       Uri.parse('$baseUrl/api/v1/visits/transcribe'),
       headers: _headers,
       body: jsonEncode({'audio_base64': audioBase64, 'language_code': languageCode}),
@@ -357,7 +400,7 @@ class ApiClient {
   /// classification. Read-only on the backend -- nothing is stored until
   /// [submitVoiceVisit] is called with the corrected values.
   Future<Map<String, dynamic>> extractFields({required String transcript}) async {
-    final resp = await http.post(
+    final resp = await _post(
       Uri.parse('$baseUrl/api/v1/visits/extract'),
       headers: _headers,
       body: jsonEncode({'transcript': transcript}),
@@ -384,7 +427,7 @@ class ApiClient {
     String? clientRequestId,
   }) async {
     assert(audioBase64 != null || confirmedTranscript != null);
-    final resp = await http.post(
+    final resp = await _post(
       Uri.parse('$baseUrl/api/v1/visits/voice'),
       headers: _headers,
       body: jsonEncode({
@@ -412,7 +455,7 @@ class ApiClient {
   /// risk the app and her supervisor's dashboard disagreeing about
   /// whether a visit was missed.
   Future<Map<String, dynamic>> fetchTaskBoard(String workerId) async {
-    final resp = await http.get(Uri.parse('$baseUrl/api/v1/tasks/$workerId'), headers: _headers);
+    final resp = await _get(Uri.parse('$baseUrl/api/v1/tasks/$workerId'), headers: _headers);
     if (resp.statusCode != 200) {
       throw ApiException('Failed to load tasks: ${resp.body}');
     }
@@ -428,7 +471,7 @@ class ApiClient {
   /// ANM/BMO "done vs pending" chart reflect real completions from the
   /// field rather than a count that only ever grows.
   Future<void> completeTask(String actionId) async {
-    final resp = await http.post(Uri.parse('$baseUrl/api/v1/tasks/$actionId/complete'), headers: _headers);
+    final resp = await _post(Uri.parse('$baseUrl/api/v1/tasks/$actionId/complete'), headers: _headers);
     if (resp.statusCode != 200) {
       throw ApiException('Failed to complete task: ${resp.body}');
     }
@@ -438,7 +481,7 @@ class ApiClient {
   /// HIGH-risk flags, pending follow-ups) plus her full visit timeline --
   /// backs the ASHA home screen. Also used by ANM/BMO roster drill-downs.
   Future<WorkerHistory> fetchWorkerHistory(String workerId) async {
-    final resp = await http.get(Uri.parse('$baseUrl/api/v1/workers/$workerId/history'), headers: _headers);
+    final resp = await _get(Uri.parse('$baseUrl/api/v1/workers/$workerId/history'), headers: _headers);
     if (resp.statusCode != 200) {
       throw ApiException('Failed to load worker history: ${resp.body}');
     }
@@ -448,7 +491,7 @@ class ApiClient {
   /// A patient's full visit timeline (transcript + extracted structured
   /// record per visit) -- backs the patient detail screen.
   Future<PatientHistory> fetchPatientHistory(String patientId) async {
-    final resp = await http.get(Uri.parse('$baseUrl/api/v1/patients/$patientId/history'), headers: _headers);
+    final resp = await _get(Uri.parse('$baseUrl/api/v1/patients/$patientId/history'), headers: _headers);
     if (resp.statusCode != 200) {
       throw ApiException('Failed to load patient history: ${resp.body}');
     }
@@ -465,7 +508,7 @@ class ApiClient {
     required String newRiskLevel,
     required String reason,
   }) async {
-    final resp = await http.post(
+    final resp = await _post(
       Uri.parse('$baseUrl/api/v1/visits/$visitId/risk-override'),
       headers: _headers,
       body: jsonEncode({'new_risk_level': newRiskLevel, 'reason': reason}),
@@ -497,7 +540,7 @@ class ApiClient {
 
   /// FR-01.3/FR-07.1: flush the offline queue once connectivity returns.
   Future<Map<String, dynamic>> syncBatch(String workerId, List<Map<String, dynamic>> records) async {
-    final resp = await http.post(
+    final resp = await _post(
       Uri.parse('$baseUrl/api/v1/sync/batch'),
       headers: _headers,
       body: jsonEncode({'worker_id': workerId, 'records': records}),
