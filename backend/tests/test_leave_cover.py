@@ -15,7 +15,7 @@ So ownership does not move. The colleague gains sight and the ability to
 record, for a stated window, and it lapses on its own. That is what makes
 it safe to let the ASHA arrange it herself.
 """
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,7 +30,15 @@ from app.main import app
 from scripts.seed_synthetic_data import seed_demo_fixtures
 
 SUB_CENTRE = "SC-PUNE-01"
-TODAY = date.today()
+# The server's day, not this machine's.
+#
+# cover.py asks `datetime.now(timezone.utc).date()` when it decides whose
+# absence is active. `date.today()` here is the *local* date, and in IST
+# those disagree between midnight and 05:30 -- so an absence declared to
+# start "today" began tomorrow as far as the server was concerned, the
+# cover never activated, and three tests failed for five and a half hours
+# a day. They passed again by breakfast, which is the worst kind of flake.
+TODAY = datetime.now(timezone.utc).date()
 
 AWAY = "9555200001"
 COVERING = "9555200002"

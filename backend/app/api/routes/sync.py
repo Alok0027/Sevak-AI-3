@@ -18,10 +18,14 @@ That works because patient_id is a client-generatable UUID rather than a
 server sequence: the phone mints the id when the ASHA taps Save with no
 signal, the visit references it immediately, and sync reconciles both."""
 import json
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from app.services.bhashini_client import get_bhashini_client
+from app.services.llm_client import get_llm_client
+from app.services import patient_intake
 from app.api.deps import DbSession, require_roles
 from app.core.config import get_settings
 from app.db.models.patient import Patient
@@ -31,6 +35,8 @@ from app.schemas.sync import SyncBatchRequest, SyncBatchResponse
 from app.schemas.visit import VoiceVisitRequest
 from app.services import identity, cover
 from app.services.visit_pipeline import run_voice_visit
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/sync", tags=["sync"])
 
@@ -67,7 +73,7 @@ async def sync_batch(
 
         try:
             if record_type == "patient":
-                _apply_patient(db, payload.worker_id, record)
+                await _apply_patient(db, settings, payload.worker_id, record)
             elif record_type == "visit":
                 visit_input = VoiceVisitRequest.model_validate({**record, "worker_id": payload.worker_id})
                 patient = db.get(Patient, record.get("patient_id"))
@@ -100,8 +106,16 @@ async def sync_batch(
     return SyncBatchResponse(synced=synced, failed=len(errors), errors=errors, results=results)
 
 
-def _apply_patient(db, worker_id: str, record: dict) -> None:
+async def _apply_patient(db, settings, worker_id: str, record: dict) -> None:
     """Create a patient the ASHA registered while offline.
+
+    `audio_base64`, when the phone sends it, is her spoken introduction of
+    the woman -- recorded at the door with no signal, so the phone could
+    not transcribe it then. It is transcribed and parsed here, and only
+    fills fields she did not type: what she typed is what she checked, and
+    a parser must not overrule her. This is what lets the voice button
+    work offline at all; without it the microphone is useless without a
+    signal, which is the opposite of what an offline-first app is for.
 
     Idempotent on patient_id. A batch that half-succeeded and got retried
     -- the ordinary case on a connection that comes and goes -- must not
@@ -120,6 +134,25 @@ def _apply_patient(db, worker_id: str, record: dict) -> None:
             if existing.worker_id != worker_id:
                 raise ValueError("Patient ID is not owned by this worker")
             return
+
+    audio = record.get("audio_base64")
+    if audio:
+        try:
+            transcript = await get_bhashini_client(settings).transcribe(
+                audio, record.get("language_code", "hi")
+            )
+            heard = await patient_intake.extract_with_llm(
+                transcript, get_llm_client(settings)
+            )
+            for field in ("name", "age", "gender", "village", "phone", "pregnancy_stage"):
+                spoken = getattr(heard, field, None)
+                if spoken not in (None, "") and not (record.get(field) or ""):
+                    record[field] = spoken
+        except Exception:  # noqa: BLE001
+            # A failed transcription must not lose the woman. She was
+            # registered at a doorstep and whatever the ASHA typed is
+            # still a record; the audio simply added nothing.
+            logger.exception("offline patient intake could not be transcribed")
 
     name = (record.get("name") or "").strip()
     if not name:

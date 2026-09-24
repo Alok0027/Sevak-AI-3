@@ -110,6 +110,12 @@ class OfflineQueue {
     String? phone,
     String? pregnancyStage,
     String? rchNumber,
+    // Her spoken introduction of the woman, when she recorded one with no
+    // signal. The phone cannot transcribe -- speech recognition lives on
+    // the server -- so the audio travels with the record and is parsed on
+    // sync, filling only the fields she did not type herself.
+    String? audioBase64,
+    String? languageCode,
   }) async {
     final db = await _database;
     await db.insert('sync_queue', {
@@ -126,6 +132,8 @@ class OfflineQueue {
         'phone': phone,
         'pregnancy_stage': pregnancyStage,
         'rch_number': rchNumber,
+        if (audioBase64 != null) 'audio_base64': audioBase64,
+        if (audioBase64 != null) 'language_code': languageCode ?? 'hi',
       })),
       'created_at': DateTime.now().toIso8601String(),
       'retry_count': 0,

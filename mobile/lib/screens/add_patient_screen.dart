@@ -38,6 +38,16 @@ class AddPatientScreen extends StatefulWidget {
 
 class _AddPatientScreenState extends State<AddPatientScreen> {
   final _queue = OfflineQueue();
+
+  /// Audio recorded with no signal, waiting to travel with the record.
+  ///
+  /// Speech recognition runs on the server, so the phone cannot turn this
+  /// into fields at the doorstep. Throwing it away would make the
+  /// microphone useless offline -- the opposite of what this app is for --
+  /// so it is kept and queued with the patient, and the server fills in
+  /// whatever she did not type when the sync runs.
+  String? _pendingAudioBase64;
+  String? _pendingAudioLanguage;
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _ageController = TextEditingController();
@@ -154,17 +164,25 @@ class _AddPatientScreenState extends State<AddPatientScreen> {
       // in a red banner, which tells an ASHA nothing about what to do
       // next. What she needs to know is: type it instead.
       final connectivity = await Connectivity().checkConnectivity();
+      final bytes = await File(path).readAsBytes();
+      final audioBase64 = base64Encode(bytes);
+
       if (connectivity.contains(ConnectivityResult.none)) {
+        // Hold it rather than refuse it. She still types the name -- the
+        // one field the server cannot invent -- and everything else she
+        // spoke is filled in when the queue flushes.
         if (mounted) {
-          setState(() => _isProcessingVoice = false);
+          setState(() {
+            _pendingAudioBase64 = audioBase64;
+            _pendingAudioLanguage = languageCode;
+            _isProcessingVoice = false;
+          });
           ScaffoldMessenger.of(context)
               .showSnackBar(SnackBar(content: Text(needsInternet)));
         }
         return;
       }
 
-      final bytes = await File(path).readAsBytes();
-      final audioBase64 = base64Encode(bytes);
       final result = await widget.api.voiceIntake(audioBase64: audioBase64, languageCode: languageCode);
       final extracted = result['extracted'] as Map<String, dynamic>;
       if (!mounted) return;
@@ -299,6 +317,8 @@ class _AddPatientScreenState extends State<AddPatientScreen> {
       phone: phone.isEmpty ? null : phone,
       pregnancyStage: pregnancy.isEmpty ? null : pregnancy,
       rchNumber: rch.isEmpty ? null : rch,
+      audioBase64: _pendingAudioBase64,
+      languageCode: _pendingAudioLanguage,
     );
     return Patient(
       id: id,
