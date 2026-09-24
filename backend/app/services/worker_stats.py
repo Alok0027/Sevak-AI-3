@@ -22,7 +22,14 @@ def list_worker_stats(
     scoped to every sub-centre in her district, not to a single one (see
     deps.visible_sub_centres). An empty list means "no sub-centres in
     scope" and correctly returns nothing; None means unrestricted."""
-    query = db.query(Worker).filter(Worker.role == "asha")
+    # Active workers only.
+    #
+    # A supervisor's roster is the team she actually has. An account still
+    # waiting for approval, or one that was rejected, is not on it -- and
+    # listing them anyway put half-finished sign-ups ("Asdfgh") on the
+    # district dashboard next to real workers, with no way to tell which
+    # was which.
+    query = db.query(Worker).filter(Worker.role == "asha", Worker.status == "active")
     if isinstance(sub_centre_id, str):
         query = query.filter(Worker.sub_centre_id == sub_centre_id)
     elif sub_centre_id is not None:

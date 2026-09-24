@@ -133,9 +133,14 @@ export default function RiskHeatmap({ points }) {
               landuse and labels are the same weight and saturation as the
               risk dots, so the data ends up competing with the map for
               attention. This one is built to sit underneath data. */}
+          {/* OpenStreetMap's own tiles, which need no key.
+              Carto's light_all basemap was here and now requires an API
+              key: every tile came back stamped "API KEY REQUIRED" in grey
+              capitals, repeated across the whole map, on every dashboard.
+              OSM is plainer but it renders. */}
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
           {drawOrder.map((p) => {
