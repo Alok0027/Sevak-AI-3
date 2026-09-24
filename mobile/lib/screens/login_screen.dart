@@ -24,6 +24,29 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _waking = false;
   Timer? _wakeNotice;
 
+  /// Unlock the session this phone already holds, if the PIN matches.
+  ///
+  /// Returns the session on success and null when there is nothing saved,
+  /// the worker is different, or the PIN is wrong -- in which case the
+  /// caller shows the network error, which is the honest thing to show:
+  /// the server really was unreachable.
+  Future<Session?> _offlineSignIn() async {
+    final phone = _phoneController.text.trim();
+    final pin = _pinController.text.trim();
+    if (!await OfflineCredential.verify(phone, pin)) return null;
+    final session = await Session.restore();
+    if (session == null) return null;
+    widget.api.setToken(session.token);
+    if (!mounted) return null;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(tr(context, 'signedInOffline'))),
+    );
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => RootShell(api: widget.api, session: session)),
+    );
+    return session;
+  }
+
   @override
   void dispose() {
     // Without this the timer fires into a disposed widget when she backs
@@ -46,7 +69,9 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted && _loading) setState(() => _waking = true);
     });
     try {
-      final result = await widget.api.login(_phoneController.text.trim(), _pinController.text.trim());
+      final phone = _phoneController.text.trim();
+      final pin = _pinController.text.trim();
+      final result = await widget.api.login(phone, pin);
       final session = Session(
         token: result['access_token'] as String,
         workerId: result['worker_id'] as String,
@@ -54,12 +79,29 @@ class _LoginScreenState extends State<LoginScreen> {
         workerName: result['worker_name'] as String,
       );
       await Session.save(session);
+      // Remember enough to check this same PIN here tomorrow, when she is
+      // three villages out with no bar of signal.
+      await OfflineCredential.remember(phone, pin);
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => RootShell(api: widget.api, session: session)),
       );
     } catch (e) {
-      setState(() => _error = readableError(e));
+      // Could not reach the server. If this phone has signed in online
+      // before, as this worker, with this PIN, let her in on what it
+      // already holds -- refusing her here would strand her from her own
+      // patient list for the rest of a day in the field.
+      //
+      // Only a network failure opens this door. A 401 is the server
+      // saying the PIN is wrong and a 403 is her account not being
+      // approved; both are answers, and neither may be second-guessed
+      // offline.
+      final networkFailure = e is! ApiException;
+      if (networkFailure) {
+        final session = await _offlineSignIn();
+        if (session != null) return;
+      }
+      if (mounted) setState(() => _error = readableError(e));
     } finally {
       _wakeNotice?.cancel();
       if (mounted) setState(() { _loading = false; _waking = false; });

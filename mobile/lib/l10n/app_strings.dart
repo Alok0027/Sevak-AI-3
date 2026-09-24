@@ -182,6 +182,11 @@ class AppStrings {
     // queues and transcribes on sync -- so the wording has to point her
     // at the way through rather than just say no.
     'voiceNeedsInternet': 'Saved offline. Type her name; the rest fills in from your recording when you reconnect.',
+    // Shown when she signs in with no signal, on a PIN this phone
+    // checked itself. She should know the app is working from what it
+    // already holds, so a stale patient list is expected rather than
+    // alarming.
+    'signedInOffline': 'Signed in offline. Your saved data is shown until you reconnect.',
     // Shown above the patient list when it came off the phone rather
     // than the server. She needs to know the risk badges may be stale,
     // without being told anything is broken -- nothing is.
@@ -468,6 +473,7 @@ class AppStrings {
     'generatedActions': 'तय किए गए कार्य',
     'offlineSaved': 'ऑफ़लाइन — फ़ोन में सहेजा गया, नेटवर्क आते ही अपने आप भेज दिया जाएगा।',
     'voiceNeedsInternet': 'ऑफ़लाइन सहेजा गया। नाम टाइप करें; बाकी जानकारी नेटवर्क आते ही आपकी रिकॉर्डिंग से भर जाएगी।',
+    'signedInOffline': 'ऑफ़लाइन साइन इन। नेटवर्क आने तक सहेजी गई जानकारी दिख रही है।',
     'showingSavedList': 'ऑफ़लाइन — सहेजी गई सूची दिख रही है। नेटवर्क आते ही अपडेट हो जाएगी।',
     'couldNotReachServer': 'सर्वर से संपर्क नहीं हुआ — फ़ोन में सहेजा गया, दोबारा कोशिश होगी।',
     'transcriptEmpty': 'कुछ लिखा नहीं गया — दोबारा रिकॉर्ड करें, या हाथ से लिखें।',
@@ -748,6 +754,7 @@ class AppStrings {
     'generatedActions': 'ठरवलेली कामे',
     'offlineSaved': 'ऑफलाइन — फोनमध्ये जतन केले, नेटवर्क आल्यावर आपोआप पाठवले जाईल.',
     'voiceNeedsInternet': 'ऑफलाइन जतन केले. नाव टाइप करा; बाकी माहिती नेटवर्क आल्यावर तुमच्या रेकॉर्डिंगमधून भरली जाईल.',
+    'signedInOffline': 'ऑफलाइन साइन इन. नेटवर्क येईपर्यंत जतन केलेली माहिती दिसत आहे.',
     'showingSavedList': 'ऑफलाइन — जतन केलेली यादी दिसत आहे. नेटवर्क आल्यावर अपडेट होईल.',
     'couldNotReachServer': 'सर्व्हरशी संपर्क झाला नाही — फोनमध्ये जतन केले, पुन्हा प्रयत्न होईल.',
     'transcriptEmpty': 'काही लिहिलेले नाही — पुन्हा रेकॉर्ड करा, किंवा हाताने लिहा.',
@@ -1028,6 +1035,7 @@ class AppStrings {
     'generatedActions': 'நிர்ணயிக்கப்பட்ட பணிகள்',
     'offlineSaved': 'ஆஃப்லைன் — தொலைபேசியில் சேமிக்கப்பட்டது, இணைப்பு வந்ததும் தானாக அனுப்பப்படும்.',
     'voiceNeedsInternet': 'ஆஃப்லைனில் சேமிக்கப்பட்டது. பெயரைத் தட்டச்சு செய்யவும்; மீதி இணைப்பு வந்ததும் உங்கள் பதிவிலிருந்து நிரப்பப்படும்.',
+    'signedInOffline': 'ஆஃப்லைனில் உள்நுழைந்தீர்கள். இணைப்பு வரும் வரை சேமித்த தகவல் காட்டப்படும்.',
     'showingSavedList': 'ஆஃப்லைன் — சேமித்த பட்டியல் காட்டப்படுகிறது. இணைப்பு வந்ததும் புதுப்பிக்கப்படும்.',
     'couldNotReachServer': 'சேவையகத்தைத் தொடர்பு கொள்ள முடியவில்லை — தொலைபேசியில் சேமிக்கப்பட்டது, மீண்டும் முயற்சிக்கப்படும்.',
     'transcriptEmpty': 'எதுவும் எழுதப்படவில்லை — மீண்டும் பதிவு செய்யவும், அல்லது கையால் எழுதவும்.',
@@ -1308,6 +1316,7 @@ class AppStrings {
     'generatedActions': 'నిర్ణయించిన పనులు',
     'offlineSaved': 'ఆఫ్‌లైన్ — ఫోన్‌లో సేవ్ అయింది, నెట్‌వర్క్ రాగానే వాటంతట అదే పంపబడుతుంది.',
     'voiceNeedsInternet': 'ఆఫ్‌లైన్‌లో సేవ్ అయింది. పేరు టైప్ చేయండి; మిగిలినవి నెట్‌వర్క్ రాగానే మీ రికార్డింగ్ నుండి నిండుతాయి.',
+    'signedInOffline': 'ఆఫ్‌లైన్‌లో సైన్ ఇన్ అయ్యారు. నెట్‌వర్క్ వచ్చే వరకు సేవ్ చేసిన సమాచారం చూపబడుతుంది.',
     'showingSavedList': 'ఆఫ్‌లైన్ — సేవ్ చేసిన జాబితా చూపబడుతోంది. నెట్‌వర్క్ రాగానే అప్‌డేట్ అవుతుంది.',
     'couldNotReachServer': 'సర్వర్‌ను చేరుకోలేకపోయాం — ఫోన్‌లో సేవ్ అయింది, మళ్లీ ప్రయత్నిస్తుంది.',
     'transcriptEmpty': 'ఏమీ రాయలేదు — మళ్లీ రికార్డ్ చేయండి, లేదా చేతితో రాయండి.',
@@ -1588,6 +1597,7 @@ class AppStrings {
     'generatedActions': 'নির্ধারিত কাজ',
     'offlineSaved': 'অফলাইন — ফোনে সংরক্ষিত, নেটওয়ার্ক এলে নিজে থেকেই পাঠানো হবে।',
     'voiceNeedsInternet': 'অফলাইনে সংরক্ষিত। নাম টাইপ করুন; বাকিটা নেটওয়ার্ক এলে আপনার রেকর্ডিং থেকে পূরণ হবে।',
+    'signedInOffline': 'অফলাইনে সাইন ইন হয়েছে। নেটওয়ার্ক না আসা পর্যন্ত সংরক্ষিত তথ্য দেখানো হচ্ছে।',
     'showingSavedList': 'অফলাইন — সংরক্ষিত তালিকা দেখানো হচ্ছে। নেটওয়ার্ক এলে আপডেট হবে।',
     'couldNotReachServer': 'সার্ভারে পৌঁছনো যায়নি — ফোনে সংরক্ষিত, আবার চেষ্টা হবে।',
     'transcriptEmpty': 'কিছু লেখা হয়নি — আবার রেকর্ড করুন, বা হাতে লিখুন।',

@@ -213,6 +213,9 @@ class _RootShellState extends State<RootShell> {
     // but a cached ward is just a copy of something the server can send
     // again, and it has no business staying on a handed-over handset.
     await PatientCache.clear();
+    // The offline PIN goes with it. A signed-out phone must not still be
+    // able to unlock her session without the server.
+    await OfflineCredential.forget();
     widget.api.clearToken();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
