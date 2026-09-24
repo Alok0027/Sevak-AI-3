@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 
 import '../l10n/app_strings.dart';
 import '../models/patient.dart';
+import '../services/patient_cache.dart';
 import '../services/api_client.dart';
 import '../services/refresh_signal.dart';
 import '../theme/tokens.dart';
@@ -39,11 +40,34 @@ class PatientListScreen extends StatefulWidget {
 class _PatientListScreenState extends State<PatientListScreen> {
   late Future<List<Patient>> _patientsFuture;
   String _search = '';
+  // Set when the list on screen came off the phone instead of the server,
+  // so the header can say so. Null means this is live data.
+  DateTime? _showingSavedFrom;
+
+  /// The server's list, or the last one saved on this phone.
+  ///
+  /// Recording a visit starts by tapping a patient in this list, so a
+  /// network failure here used to end the whole flow with "Failed to
+  /// load". Falling back to the saved copy is what lets her work through
+  /// a village with no signal. Only if there is no saved copy either --
+  /// a fresh install, offline -- does the error reach her.
+  Future<List<Patient>> _loadPatients() async {
+    try {
+      final live = await widget.api.fetchPatients(widget.workerId);
+      if (mounted) setState(() => _showingSavedFrom = null);
+      return live;
+    } catch (error) {
+      final cached = await PatientCache.load(widget.workerId);
+      if (cached == null) rethrow;
+      if (mounted) setState(() => _showingSavedFrom = cached.savedAt);
+      return cached.patients;
+    }
+  }
 
   @override
   void initState() {
     super.initState();
-    _patientsFuture = widget.api.fetchPatients(widget.workerId);
+    _patientsFuture = _loadPatients();
     widget.refresh?.addListener(_refresh);
   }
 
@@ -55,7 +79,7 @@ class _PatientListScreenState extends State<PatientListScreen> {
 
   Future<void> _refresh() async {
     if (!mounted) return;
-    final next = widget.api.fetchPatients(widget.workerId);
+    final next = _loadPatients();
     // Braces, not `=> _patientsFuture = next`: an arrow body *returns* the
     // assigned value, and Flutter asserts when a setState callback returns
     // a Future ("did you mean to await something in here?").
@@ -206,6 +230,30 @@ class _PatientListScreenState extends State<PatientListScreen> {
               onChanged: (v) => setState(() => _search = v.toLowerCase().trim()),
             ),
           ),
+          // Offline notice, above the list rather than in place of it.
+          // The list itself is the point; this is a caption on it.
+          if (_showingSavedFrom != null)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(T.s4, 0, T.s4, T.s2),
+              padding: const EdgeInsets.symmetric(horizontal: T.s3, vertical: T.s2),
+              decoration: BoxDecoration(
+                color: T.sage,
+                borderRadius: BorderRadius.circular(T.radius),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.cloud_off_rounded, size: 16, color: T.slate),
+                  const SizedBox(width: T.s2),
+                  Expanded(
+                    child: Text(
+                      tr(context, 'showingSavedList'),
+                      style: const TextStyle(fontSize: 12, color: T.slate),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Expanded(
             child: RefreshIndicator(
               color: T.forest,

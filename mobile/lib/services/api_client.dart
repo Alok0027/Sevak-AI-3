@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../models/history_models.dart';
 import '../models/patient.dart';
+import 'patient_cache.dart';
 
 /// Talks to the FastAPI backend (../backend).
 ///
@@ -326,6 +328,11 @@ class ApiClient {
       throw ApiException('Failed to load patients: ${resp.body}');
     }
     final data = jsonDecode(resp.body) as Map<String, dynamic>;
+    // Keep the answer for the next time she opens this in a village with
+    // no signal. Written before parsing, and deliberately not awaited into
+    // the failure path: a cache that will not save must never cost her the
+    // list she just successfully fetched.
+    unawaited(PatientCache.save(workerId, resp.body).catchError((_) {}));
     return (data['patients'] as List).map((p) => Patient.fromJson(p as Map<String, dynamic>)).toList();
   }
 

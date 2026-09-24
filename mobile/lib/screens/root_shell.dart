@@ -6,6 +6,7 @@ import '../widgets/tutorial_overlay.dart';
 import '../services/api_client.dart';
 import '../services/offline_queue.dart';
 import '../services/refresh_signal.dart';
+import '../services/patient_cache.dart';
 import '../services/session.dart';
 import '../services/sync_service.dart';
 import '../theme/tokens.dart';
@@ -207,6 +208,11 @@ class _RootShellState extends State<RootShell> {
     if (confirmed != true) return;
     await _syncService.dispose();
     await Session.clear();
+    // Her saved patient list goes too. The unsent queue deliberately does
+    // not (see OfflineQueue) -- work she recorded must survive a logout --
+    // but a cached ward is just a copy of something the server can send
+    // again, and it has no business staying on a handed-over handset.
+    await PatientCache.clear();
     widget.api.clearToken();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
