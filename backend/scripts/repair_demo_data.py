@@ -13,6 +13,14 @@ rows were already in the database before the fix shipped:
    like "Mohammed Bose, 39, Male, 2 months pregnant". A reviewer who sees
    the system assert a pregnant man stops believing its risk scores.
 
+3. Workers were seeded into invented sub-centres -- SC-VILLE-12 and the
+   like, in a district called VILLE -- that no ANM covered and no BMO
+   owned. An ASHA with nobody above her is not a smaller version of the
+   system, she is invisible to it: her patients are missing from the
+   district totals, her HIGH-risk cases reach no supervisor, and the
+   escalation queue is silently incomplete. On the deployed database this
+   was 18 of 25 ASHAs, 112 patients and 496 visits.
+
 Both are repaired in place. Nothing is deleted: the visits, their
 readings, their risk flags and every report built from them stay exactly
 as they are, because those are the parts that are real.
@@ -34,9 +42,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from faker import Faker  # noqa: E402
 
+from app.core.security import hash_pin  # noqa: E402
 from app.db.models.patient import Patient  # noqa: E402
+from app.db.models.worker import Worker  # noqa: E402
 from app.db.models.visit import Visit  # noqa: E402
 from app.db.session import SessionLocal, init_db  # noqa: E402
+from scripts.seed_synthetic_data import DISTRICT_ID, SUB_CENTRES, ensure_supervisors  # noqa: E402
 
 fake = Faker("en_IN")
 
@@ -71,8 +82,19 @@ def main() -> None:
             .all()
         )
 
+        # Workers nobody supervises.
+        anm_sub_centres = {
+            sc for (sc,) in db.query(Worker.sub_centre_id)
+            .filter(Worker.role == "anm", Worker.sub_centre_id.isnot(None)).distinct()
+        }
+        orphan_ashas = [
+            w for w in db.query(Worker).filter(Worker.role == "asha").all()
+            if w.sub_centre_id not in anm_sub_centres or w.district_id != DISTRICT_ID
+        ]
+
         print(f"visits carrying the placeholder transcript : {len(visits)}")
         print(f"patients recorded pregnant but not female  : {len(pregnant_not_female)}")
+        print(f"ASHAs with no ANM above them, or outside the district : {len(orphan_ashas)}")
 
         if pregnant_not_female:
             print("\n  e.g. " + ", ".join(
@@ -84,7 +106,7 @@ def main() -> None:
             print("\n--dry-run: nothing written.")
             return
 
-        if not visits and not pregnant_not_female:
+        if not visits and not pregnant_not_female and not orphan_ashas:
             print("\nNothing to repair.")
             return
 
@@ -105,7 +127,34 @@ def main() -> None:
                 p.age = random.randint(20, 40)
 
         db.commit()
+
+        # Put every unsupervised ASHA under a real ANM, in the district the
+        # BMO owns, and move her patients' sub_centre_id with her -- a
+        # patient's sub-centre is where she lives, and it has to agree with
+        # her worker's or the district roll-up counts her in one place and
+        # lists her in another.
+        moved_patients = 0
+        if orphan_ashas:
+            ensure_supervisors(db)
+            for i, worker in enumerate(orphan_ashas):
+                worker.sub_centre_id = SUB_CENTRES[i % len(SUB_CENTRES)]
+                worker.district_id = DISTRICT_ID
+                moved_patients += (
+                    db.query(Patient)
+                    .filter(Patient.worker_id == worker.worker_id)
+                    .update({Patient.sub_centre_id: worker.sub_centre_id},
+                            synchronize_session=False)
+                )
+            # Any ANM or BMO row that predates district_id.
+            for w in db.query(Worker).filter(Worker.role.in_(["anm", "bmo"])).all():
+                if not w.district_id:
+                    w.district_id = DISTRICT_ID
+            db.commit()
+
         print(f"\nRepaired {len(visits)} transcripts and {len(pregnant_not_female)} patient records.")
+        if orphan_ashas:
+            print(f"Placed {len(orphan_ashas)} ASHAs under an ANM "
+                  f"({moved_patients} patients moved with them).")
     finally:
         db.close()
 

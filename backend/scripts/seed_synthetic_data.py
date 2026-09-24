@@ -65,6 +65,21 @@ DRIVER_TEMPLATES = {
     "LOW": [],
 }
 
+# The shape of the deployment this dataset describes: one district, four
+# sub-centres inside it, an ANM over each sub-centre, and a BMO over the
+# district.
+#
+# It used to be `f"SC-{fake.city_suffix().upper()}-{random.randint(1,20)}"`,
+# which invented sub-centres like SC-VILLE-12 in a district called VILLE.
+# Nobody supervised them. 18 of 25 ASHAs, 112 patients and 496 visits sat
+# in the database entirely invisible to the only ANM and the only BMO --
+# so the district dashboard showed a third of the work and the totals
+# quietly disagreed with themselves.
+#
+# Every generated worker now belongs somewhere real.
+DISTRICT_ID = "PUNE"
+SUB_CENTRES = ["SC-PUNE-01", "SC-PUNE-02", "SC-PUNE-03", "SC-PUNE-04"]
+
 DEMO_WORKER_PHONE = "9999999999"
 DEMO_WORKER_PIN = "1234"
 
@@ -468,6 +483,42 @@ def seed_demo_worker_caseload(db, patients_per_worker: int, months_history: int)
     db.commit()
 
 
+def ensure_supervisors(db) -> list[str]:
+    """One ANM over every sub-centre, all of them in the BMO's district.
+
+    An ASHA with no ANM above her is not a smaller version of the system;
+    she is invisible to it. Her HIGH-risk cases reach nobody, her patients
+    are missing from the district totals, and the escalation queue is
+    silently incomplete. Created here so the seeded deployment always has
+    a complete chain: ASHA -> ANM -> BMO.
+    """
+    created = []
+    for sub_centre_id in SUB_CENTRES:
+        existing = (
+            db.query(Worker)
+            .filter(Worker.role == "anm", Worker.sub_centre_id == sub_centre_id)
+            .first()
+        )
+        if existing is not None:
+            # Keep her in the district even if she predates the column.
+            if not existing.district_id:
+                existing.district_id = DISTRICT_ID
+            continue
+        anm = Worker(
+            name=f"Dr. {fake.name_female()}",
+            phone=fake.unique.numerify("9#########"),
+            pin_hash=hash_pin("0000"),
+            language_pref="hi",
+            sub_centre_id=sub_centre_id,
+            district_id=DISTRICT_ID,
+            role="anm",
+        )
+        db.add(anm)
+        created.append(sub_centre_id)
+    db.commit()
+    return created
+
+
 def seed_random_workers(db, n_workers: int, patients_per_worker: int, months_history: int) -> None:
     # Put a handful of the random workers in the demo ANM's sub-centre
     # (SC-PUNE-01) so her roster/dashboard has more than the single demo
@@ -480,13 +531,22 @@ def seed_random_workers(db, n_workers: int, patients_per_worker: int, months_his
     # interrupt it -- which leaves a half-seeded database, because the
     # commit below is per worker. Three interrupted runs is how you end up
     # with 77 workers when you asked for 20.
+    created = ensure_supervisors(db)
+    if created:
+        print(f"Created an ANM for: {', '.join(created)}", flush=True)
+
     print(f"Seeding {n_workers} workers x {patients_per_worker} patients, "
           f"{months_history} months of history...", flush=True)
 
     for i in range(n_workers):
         print(f"  worker {i + 1}/{n_workers}", end="\r", flush=True)
+        # Weighted to the demo ANM's own sub-centre so her roster has
+        # enough workers to show sorting and the leaderboard, then spread
+        # evenly across the rest -- all of them inside the district the
+        # BMO actually supervises.
         sub_centre_id = (
-            "SC-PUNE-01" if i < demo_sub_centre_slots else f"SC-{fake.city_suffix().upper()}-{random.randint(1, 20):02d}"
+            "SC-PUNE-01" if i < demo_sub_centre_slots
+            else SUB_CENTRES[i % len(SUB_CENTRES)]
         )
         worker = Worker(
             # ASHA (Accredited Social Health Activist) is a women-only role
@@ -499,6 +559,7 @@ def seed_random_workers(db, n_workers: int, patients_per_worker: int, months_his
             pin_hash=hash_pin("0000"),
             language_pref=random.choice(LANGUAGES),
             sub_centre_id=sub_centre_id,
+            district_id=DISTRICT_ID,
             role="asha",
         )
         db.add(worker)
