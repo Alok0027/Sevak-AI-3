@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { fetchPatientHistory, overrideRisk, resolveRisk } from "../api/client";
+import {
+  correctPatientWithDocument,
+  fetchCorrections,
+  fetchPatientHistory,
+  overrideRisk,
+  resolveRisk,
+} from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import AppShell from "../components/AppShell";
 import { Empty, RiskTag, Section } from "../components/Surface";
@@ -66,6 +72,16 @@ export default function PatientDetailPage() {
   // Resolution is a fact about the patient, not about one row in her
   // timeline -- so this is a single flag, not a visit id.
   const [resolving, setResolving] = useState(false);
+
+  // Official correction (BMO only). Separate from everything above
+  // because it changes who she is on the record, not what was found.
+  const [correcting, setCorrecting] = useState(false);
+  const [correction, setCorrection] = useState({ name: "", age: "", phone: "", village: "" });
+  const [correctionReason, setCorrectionReason] = useState("");
+  const [correctionFile, setCorrectionFile] = useState(null);
+  const [correctionError, setCorrectionError] = useState(null);
+  const [correctionSaving, setCorrectionSaving] = useState(false);
+  const [corrections, setCorrections] = useState([]);
   const [resolveNote, setResolveNote] = useState("");
   const [resolveError, setResolveError] = useState(null);
   const [resolveSubmitting, setResolveSubmitting] = useState(false);
@@ -74,7 +90,48 @@ export default function PatientDetailPage() {
     fetchPatientHistory(patientId)
       .then(setData)
       .catch((err) => setError(err.response?.data?.detail || "Failed to load patient"));
+    // A record that has been corrected should say so wherever it is read,
+    // not only where it was corrected. Failure is ignored on purpose: an
+    // ASHA has no access to this and must still see the patient page.
+    fetchCorrections(patientId).then(setCorrections).catch(() => setCorrections([]));
   }, [patientId]);
+
+  async function submitCorrection(e) {
+    e.preventDefault();
+    if (!correctionFile) {
+      setCorrectionError("Attach the supporting document.");
+      return;
+    }
+    setCorrectionSaving(true);
+    setCorrectionError(null);
+    try {
+      const updated = await correctPatientWithDocument(
+        patientId,
+        correction,
+        correctionFile,
+        correctionReason,
+      );
+      // Re-read rather than patching state by hand: the correction may
+      // have changed the name this whole page is titled with.
+      const [fresh, history] = await Promise.all([
+        fetchCorrections(patientId),
+        fetchPatientHistory(patientId),
+      ]);
+      setCorrections(fresh);
+      setData(history);
+      setCorrecting(false);
+      setCorrection({ name: "", age: "", phone: "", village: "" });
+      setCorrectionReason("");
+      setCorrectionFile(null);
+      return updated;
+    } catch (err) {
+      setCorrectionError(
+        err.response?.data?.detail || "Could not record this correction.",
+      );
+    } finally {
+      setCorrectionSaving(false);
+    }
+  }
 
   function startOverride(e, visit) {
     e.stopPropagation();
@@ -287,7 +344,93 @@ export default function PatientDetailPage() {
       <Section
         title="Registration record"
         sub="Taken once when she was registered. Readings from a visit go on the timeline below, where they set the risk level."
+        aside={
+          /* BMO only, and only past the first day. Inside 24 hours the
+             ASHA who met her fixes her own typo from the app; after that
+             the record has been referred on and reported, so changing it
+             is an official correction made against a document. */
+          auth?.role === "bmo" && !correcting ? (
+            <button className="btn-quiet" onClick={() => setCorrecting(true)}>
+              Correct record
+            </button>
+          ) : null
+        }
       >
+        {correcting && (
+          <form className="override-form correction-form" onSubmit={submitCorrection}>
+            <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+              This record has been referred on and reported. Fill only the fields that are
+              wrong, and attach the document the family produced — Aadhaar, MCP card or
+              voter ID. The correction and the document are kept together on the record.
+            </p>
+
+            <div className="correction-grid">
+              <label htmlFor="c-name">Name</label>
+              <input id="c-name" value={correction.name} placeholder={data.patient_name}
+                onChange={(e) => setCorrection({ ...correction, name: e.target.value })} />
+
+              <label htmlFor="c-age">Age</label>
+              <input id="c-age" type="number" value={correction.age}
+                placeholder={data.age ?? ""}
+                onChange={(e) => setCorrection({ ...correction, age: e.target.value })} />
+
+              <label htmlFor="c-village">Village</label>
+              <input id="c-village" value={correction.village} placeholder={data.village ?? ""}
+                onChange={(e) => setCorrection({ ...correction, village: e.target.value })} />
+
+              <label htmlFor="c-phone">Phone</label>
+              <input id="c-phone" value={correction.phone} placeholder="unchanged"
+                onChange={(e) => setCorrection({ ...correction, phone: e.target.value })} />
+            </div>
+
+            <label htmlFor="c-doc">Supporting document (required)</label>
+            <input id="c-doc" type="file"
+              onChange={(e) => setCorrectionFile(e.target.files?.[0] ?? null)} />
+            <p className="muted" style={{ margin: 0, fontSize: 11.5 }}>
+              Maximum file size 5 MB.
+            </p>
+
+            <label htmlFor="c-reason">Reason (required, kept in the audit trail)</label>
+            <textarea id="c-reason" value={correctionReason}
+              onChange={(e) => setCorrectionReason(e.target.value)}
+              placeholder="e.g. Name was misheard at registration. Corrected against the Aadhaar card produced by her husband." />
+
+            {correctionError && <p className="error">{correctionError}</p>}
+            <div className="override-actions">
+              <button type="button" className="btn-quiet" disabled={correctionSaving}
+                onClick={() => { setCorrecting(false); setCorrectionError(null); }}>
+                Cancel
+              </button>
+              <button type="submit" className="btn-submit"
+                disabled={correctionSaving || correctionReason.trim().length < 5 || !correctionFile}>
+                {correctionSaving ? "Saving…" : "Record correction"}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {corrections.length > 0 && (
+          <div className="correction-history">
+            <strong>Corrected since registration</strong>
+            {corrections.map((c) => (
+              <div key={c.document_id} className="correction-entry">
+                <span>
+                  {c.changed_fields.join(", ")} — {c.corrected_by} on{" "}
+                  {new Date(c.corrected_at).toLocaleDateString()}
+                </span>
+                <span className="muted">“{c.reason}”</span>
+                <a
+                  href={`${import.meta.env.VITE_API_BASE_URL ?? ""}/api/v1/patients/${patientId}/corrections/${c.document_id}/file`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {c.document_name}
+                </a>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="record">
           <Field label="Age" value={data.age} />
           <Field label="Gender" value={data.gender} capitalize />

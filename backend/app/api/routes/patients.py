@@ -6,9 +6,10 @@ the database hands back -- see app/services/patient_priority.py for why
 order carries more of the signal here than colour does.
 """
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy import func
 from sqlalchemy.orm import aliased
 
@@ -21,6 +22,7 @@ from app.api.deps import (
 )
 from app.core.config import get_settings
 from app.db.models.action import Action
+from app.db.models.correction_document import CorrectionDocument
 from app.db.models.patient import Patient
 from app.db.models.risk_flag import RiskFlag
 from app.db.models.risk_resolution import RiskResolution
@@ -693,25 +695,47 @@ def reassign_caseload(
     )
 
 
+# How long a newly registered record stays a draft somebody can simply
+# fix. A day covers the walk home and the evening she writes up -- long
+# enough for the ASHA to catch her own mistake, short enough that a name
+# the district has already reported on cannot be quietly rewritten.
+CORRECTION_WINDOW = timedelta(hours=24)
+
+
 def _writable_patient(db, user, patient_id: str) -> Patient:
     """The patient, if this caller may correct her record.
 
-    Deliberately narrower than who may *read* it. An ASHA may correct her
-    own patients (including anyone she is covering for), and an ANM may
-    correct anyone in her sub-centre, because those two are the people
-    who actually meet the woman and can check the spelling of her name.
+    Two different acts, split by a 24-hour clock.
 
-    A BMO may not, even though she can read every record in the district:
-    SRS table 4 gives her "read-only access to patient data", and a
-    district officer editing a demographic detail she has no way to verify
-    is not a correction, it is a guess overwriting the only person who
-    knows. Admin may not either, for the same reason plus the one in
-    deps.visible_sub_centres -- the admin role administers the system, not
-    a place.
+    **Within a day of registration** a wrong name is a typo. The ASHA
+    heard "Meera" as "Heera" while standing at the door; she or her ANM
+    fixes it and nothing else in the system has happened yet. That is this
+    function, and it needs a reason but no paperwork.
+
+    **After a day** the record has been used. A referral letter has gone
+    to a PHC under that name, an HMIS return has counted her under it. So
+    it stops being an edit and becomes an official correction: the BMO
+    makes it, against a document -- see `correct_patient_with_document`.
+    An ASHA may no longer quietly rewrite a name the district has already
+    reported on.
+
+    Admin may do neither: the role administers the system, not the care.
     """
     patient = db.query(Patient).filter(Patient.patient_id == patient_id).first()
     if patient is None:
         raise HTTPException(status_code=404, detail="Patient not found")
+
+    registered = patient.created_at
+    if registered is not None and registered.tzinfo is None:
+        registered = registered.replace(tzinfo=timezone.utc)
+    if registered is not None and datetime.now(timezone.utc) - registered > CORRECTION_WINDOW:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This record is more than 24 hours old. A correction now needs a "
+                "supporting document and must be made by the Block Medical Officer."
+            ),
+        )
 
     if user.role == "asha":
         if patient.worker_id not in cover.visible_worker_ids(db, user.worker_id):
@@ -882,4 +906,186 @@ def change_patient_status(
         status=patient.status,
         closed_at=patient.closed_at,
         followups_cancelled=cancelled,
+    )
+
+
+# A prototype limit, but a real one: it is checked on the server, after
+# reading, so a client that ignores the hint in the UI still cannot get a
+# 50MB scan into the database.
+MAX_DOCUMENT_BYTES = 5 * 1024 * 1024
+
+
+@router.post("/{patient_id}/correction", response_model=PatientSummary)
+async def correct_patient_with_document(
+    patient_id: str,
+    db: DbSession,
+    name: str | None = Form(default=None),
+    age: int | None = Form(default=None),
+    phone: str | None = Form(default=None),
+    village: str | None = Form(default=None),
+    reason: str = Form(min_length=5, max_length=500),
+    document: UploadFile = File(...),
+    user=Depends(require_roles("bmo")),
+) -> PatientSummary:
+    """An official correction to a record that has already been used.
+
+    BMO only, and the document is not optional. Past the first day a
+    patient's name is not a field in a form -- a referral letter has gone
+    to a PHC under it and an HMIS return has counted her under it. So
+    changing it is an act against evidence: an Aadhaar card, an MCP card,
+    a voter ID, whatever the family actually produced.
+
+    Requiring the file is the whole point of the endpoint. Without it this
+    would just be the quick edit with a different role on the front, and
+    the district would have no way to answer "why is this woman's name
+    different from the one on last month's return".
+
+    The file is stored exactly as handed over, and the audit entry records
+    which document justified which field -- so the correction and its
+    proof cannot drift apart later.
+    """
+    patient = db.query(Patient).filter(Patient.patient_id == patient_id).first()
+    if patient is None:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    allowed = visible_sub_centres(user, db)
+    if allowed is not None and patient.sub_centre_id not in allowed:
+        raise HTTPException(status_code=403, detail="Patient is outside your district")
+
+    content = await document.read()
+    if not content:
+        raise HTTPException(status_code=422, detail="The uploaded document is empty")
+    if len(content) > MAX_DOCUMENT_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Document is {len(content) / 1024 / 1024:.1f} MB. "
+                "The maximum is 5 MB."
+            ),
+        )
+
+    submitted = {"name": name, "age": age, "phone": phone, "village": village}
+    changes: dict[str, dict] = {}
+    for field, value in submitted.items():
+        if value is None or value == "":
+            continue
+        old_value = getattr(patient, field)
+        if old_value == value:
+            continue
+        setattr(patient, field, value)
+        # Encrypted fields are recorded as "changed" without their values,
+        # for the same reason the quick edit does it: the audit log is
+        # readable in the admin console, and writing the old name there in
+        # clear would undo the encryption on the row it describes.
+        changes[field] = {"changed": True} if field in ("name", "phone") else {
+            "from": old_value, "to": value
+        }
+
+    if not changes:
+        raise HTTPException(status_code=400, detail="Nothing to correct -- no field differs")
+
+    if "village" in changes:
+        patient.village_code = identity.village_code(patient.village)
+    if "phone" in changes:
+        patient.phone_hash = identity.phone_index(patient.phone)
+
+    officer = db.query(Worker).filter(Worker.worker_id == user.worker_id).first()
+    record = CorrectionDocument(
+        patient_id=patient_id,
+        content=content,
+        content_type=document.content_type,
+        size_bytes=len(content),
+        filename=document.filename,
+        changed_fields=json.dumps(sorted(changes)),
+        reason=reason,
+        uploaded_by=user.worker_id,
+        uploaded_by_name=officer.name if officer else None,
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(patient)
+
+    audit_record(
+        db,
+        user_id=user.worker_id,
+        action_type="patient.correct.official",
+        record_id=patient_id,
+        record_type="patient",
+        details={
+            "reason": reason,
+            "changed": changes,
+            "document_id": record.document_id,
+            "document_name": document.filename,
+            "document_size_bytes": len(content),
+            "by_role": user.role,
+        },
+    )
+
+    visits = db.query(Visit).filter(Visit.patient_id == patient_id).order_by(Visit.created_at.desc()).all()
+    return PatientSummary(
+        id=patient.patient_id,
+        name=patient.name,
+        age=patient.age,
+        village=patient.village,
+        pregnancy_stage=patient.pregnancy_stage,
+        rch_number=patient.rch_number,
+        risk_status=visits[0].risk_level if visits else None,
+        last_visit=visits[0].created_at if visits else None,
+        total_visits=len(visits),
+    )
+
+
+@router.get("/{patient_id}/corrections")
+def list_corrections(
+    patient_id: str,
+    db: DbSession,
+    user=Depends(require_roles("anm", "bmo")),
+) -> dict:
+    """The correction history on a record, so the proof is visible rather
+    than merely stored. An ANM may read it -- she is the one who has to
+    explain to a PHC why the name on this month's referral differs from
+    last month's."""
+    rows = (
+        db.query(CorrectionDocument)
+        .filter(CorrectionDocument.patient_id == patient_id)
+        .order_by(CorrectionDocument.uploaded_at.desc())
+        .all()
+    )
+    return {
+        "corrections": [
+            {
+                "document_id": r.document_id,
+                "changed_fields": json.loads(r.changed_fields),
+                "reason": r.reason,
+                "document_name": r.filename,
+                "size_bytes": r.size_bytes,
+                "corrected_by": r.uploaded_by_name,
+                "corrected_at": r.uploaded_at.isoformat(),
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.get("/{patient_id}/corrections/{document_id}/file")
+def download_correction_document(
+    patient_id: str,
+    document_id: str,
+    db: DbSession,
+    user=Depends(require_roles("anm", "bmo")),
+):
+    """The document itself, handed back exactly as it was uploaded."""
+    record = (
+        db.query(CorrectionDocument)
+        .filter(CorrectionDocument.document_id == document_id,
+                CorrectionDocument.patient_id == patient_id)
+        .first()
+    )
+    if record is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    audit_read(db, user.worker_id, patient_id, "correction_document")
+    return Response(
+        content=record.content,
+        media_type=record.content_type or "application/octet-stream",
+        headers={"Content-Disposition": f'inline; filename="{record.filename or document_id}"'},
     )

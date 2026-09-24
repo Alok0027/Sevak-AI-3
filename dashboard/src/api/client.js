@@ -253,4 +253,32 @@ export async function fetchHmisPdf(workerId, month, year) {
   return data;
 }
 
+/** An official correction to a record older than a day (BMO only).
+ *
+ * multipart/form-data rather than JSON, because it carries a file: past
+ * the first 24 hours a name change is not an edit, it is a correction
+ * against a document, and the backend refuses the request without one.
+ *
+ * The Content-Type header is deliberately not set. The browser has to
+ * write it itself so it can append the multipart boundary; setting it by
+ * hand produces a body the server cannot split.
+ */
+export async function correctPatientWithDocument(patientId, fields, document, reason) {
+  const form = new FormData();
+  Object.entries(fields).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") form.append(key, value);
+  });
+  form.append("reason", reason);
+  form.append("document", document);
+  const { data } = await client.post(`/api/v1/patients/${patientId}/correction`, form);
+  return data;
+}
+
+/** The correction history on a record, so the proof is visible and not
+ * merely stored somewhere. */
+export async function fetchCorrections(patientId) {
+  const { data } = await client.get(`/api/v1/patients/${patientId}/corrections`);
+  return data.corrections;
+}
+
 export default client;

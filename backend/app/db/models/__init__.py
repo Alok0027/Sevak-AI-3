@@ -9,6 +9,7 @@ from app.db.models import (  # noqa: F401
     absence,
     action,
     audit_log,
+    correction_document,
     hmis_report,
     notification,
     patient,
