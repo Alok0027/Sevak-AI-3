@@ -257,7 +257,13 @@ def analytics(
 @router.get("/followup-compliance", response_model=FollowupComplianceResponse)
 def followup_compliance(
     db: DbSession,
-    user=Depends(require_roles("anm", "bmo", "admin")),
+    # Not admin. This endpoint names patients -- her name, age, village and
+    # the clinical reason she was flagged -- so it is patient record
+    # access even though it arrives as a supervisor's worklist rather than
+    # as a patient page. Closing /patients and /reports to admin while
+    # leaving this open meant the block could be walked straight around
+    # from the Overview screen. See app/api/routes/patients.py.
+    user=Depends(require_roles("anm", "bmo")),
 ) -> FollowupComplianceResponse:
     """FR-08 accountability: which ASHA owes which patient a visit, and
     which of those are already late.

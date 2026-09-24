@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 import { useSortableData } from "../hooks/useSortableData";
 import { Empty } from "./Surface";
 
@@ -52,6 +53,12 @@ function Count({ value, tone }) {
 }
 
 export default function WorkerRoster({ workers, showSubCentre }) {
+  // An admin may see the roster -- who works where, how many are overdue
+  // -- but a worker's history is her visit timeline, and every entry names
+  // the patient she saw. The backend refuses her that page, so the rows
+  // must not look clickable to her.
+  const { auth } = useAuth();
+  const canOpenWorker = auth?.role !== "admin";
   const navigate = useNavigate();
   const [riskFilter, setRiskFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -123,8 +130,8 @@ export default function WorkerRoster({ workers, showSubCentre }) {
                 {sorted.map((w) => (
                   <tr
                     key={w.worker_id}
-                    onClick={() => navigate(`/workers/${w.worker_id}`)}
-                    className="is-clickable"
+                    onClick={canOpenWorker ? () => navigate(`/workers/${w.worker_id}`) : undefined}
+                    className={canOpenWorker ? "is-clickable" : undefined}
                   >
                     <td className={`rail-cell tone-${workerTone(w)}`} />
                     <td>

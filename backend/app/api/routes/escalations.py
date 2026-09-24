@@ -10,7 +10,13 @@ router = APIRouter(prefix="/api/v1/escalations", tags=["escalations"])
 @router.get("/pending")
 def pending_escalations(
     db: DbSession,
-    user=Depends(require_roles("anm", "bmo", "admin")),
+    # Not admin. This endpoint names patients -- her name, age, village and
+    # the clinical reason she was flagged -- so it is patient record
+    # access even though it arrives as a supervisor's worklist rather than
+    # as a patient page. Closing /patients and /reports to admin while
+    # leaving this open meant the block could be walked straight around
+    # from the Overview screen. See app/api/routes/patients.py.
+    user=Depends(require_roles("anm", "bmo")),
     bmo_id: str | None = Query(default=None),
 ) -> dict:
     # Run the 48h auto-escalation check inline so the list is always current

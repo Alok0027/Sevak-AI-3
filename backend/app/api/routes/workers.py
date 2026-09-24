@@ -61,7 +61,11 @@ def list_workers(
 def worker_history(
     worker_id: str,
     db: DbSession,
-    user=Depends(require_roles("asha", "anm", "bmo", "admin")),
+    # Not admin. This is a worker's *visit* timeline, and every entry
+    # names the patient she saw -- so despite living under /workers it is
+    # patient record access. Found by the sweep in
+    # tests/test_district_isolation.py, not by reading the route list.
+    user=Depends(require_roles("asha", "anm", "bmo")),
 ) -> WorkerHistoryResponse:
     # An ASHA worker may only ever pull up her own history -- this doubles as
     # the mobile app's "my stats" home screen (patients treated, pending

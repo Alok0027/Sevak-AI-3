@@ -42,6 +42,11 @@ const POLL_INTERVAL_MS = 60_000;
 export default function DashboardPage() {
   const { auth } = useAuth();
   const isBmo = auth?.role === "bmo" || auth?.role === "admin";
+  // An admin administers accounts, not care. The backend refuses her the
+  // two endpoints below, which name patients; without this the page would
+  // just show two permanently empty sections and a pair of 403s in the
+  // console. Everything else here is counts and villages, which she keeps.
+  const seesPatients = auth?.role !== "admin";
 
   const [metrics, setMetrics] = useState(null);
   const [heatmap, setHeatmap] = useState(null);
@@ -63,9 +68,9 @@ export default function DashboardPage() {
         fetchMetrics(options),
         fetchHeatmap(options),
         fetchAnalytics(options),
-        fetchEscalations(options),
+        seesPatients ? fetchEscalations(options) : Promise.resolve([]),
         fetchWorkers(options),
-        fetchFollowupCompliance(options),
+        seesPatients ? fetchFollowupCompliance(options) : Promise.resolve(null),
       ]);
       if (controller.signal.aborted) return;
       setMetrics(m);
@@ -195,24 +200,28 @@ export default function DashboardPage() {
           after she has rung the worker. */}
       <CoverPanel />
 
-      <Section
-        title="Visit accountability"
-        sub="Which ASHA owes which patient a follow-up, and which are past the deadline set for that patient's risk level."
-      >
-        <FollowupCompliance compliance={compliance} showSubCentre={isBmo} />
-      </Section>
+      {seesPatients && (
+        <Section
+          title="Visit accountability"
+          sub="Which ASHA owes which patient a follow-up, and which are past the deadline set for that patient's risk level."
+        >
+          <FollowupCompliance compliance={compliance} showSubCentre={isBmo} />
+        </Section>
+      )}
 
-      <Section
-        title="Unactioned HIGH risk cases"
-        sub="Flagged by the risk agent and not yet picked up. Past 48 hours they escalate automatically."
-        aside={
-          escalations.length > 0 ? (
-            <span className="chip">{escalations.length} waiting</span>
-          ) : null
-        }
-      >
-        <EscalationList escalations={escalations} showSubCentre={isBmo} />
-      </Section>
+      {seesPatients && (
+        <Section
+          title="Unactioned HIGH risk cases"
+          sub="Flagged by the risk agent and not yet picked up. Past 48 hours they escalate automatically."
+          aside={
+            escalations.length > 0 ? (
+              <span className="chip">{escalations.length} waiting</span>
+            ) : null
+          }
+        >
+          <EscalationList escalations={escalations} showSubCentre={isBmo} />
+        </Section>
+      )}
 
       <Section title={isBmo ? "ASHA workers" : "My sub-centre's ASHA workers"}>
         <WorkerRoster workers={workers} showSubCentre={isBmo} />

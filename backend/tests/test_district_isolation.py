@@ -344,3 +344,117 @@ def test_an_admin_cannot_read_patient_records_but_keeps_the_system_it_administer
             assert resp.status_code == 200, (
                 f"{path} should stay open to an admin, got {resp.status_code}"
             )
+
+
+def test_no_endpoint_an_admin_can_reach_returns_a_patient_name():
+    """The test I should have written the first time.
+
+    Closing /patients and /reports to the admin role was not enough: the
+    escalation queue and the follow-up compliance view also name patients
+    -- her name, age, village and the clinical reason she was flagged --
+    and both were still open. The block could be walked around from the
+    Overview screen without trying.
+
+    So this does not check a list of endpoints someone remembered. It
+    walks every GET path in the OpenAPI schema, calls each one with an
+    admin token, and fails if a real patient's name appears in any
+    response that succeeds.
+
+    (Routes are read from app.openapi(), not app.routes: included routers
+    nest, so app.routes lists 17 entries and none of the real ones -- a
+    first version of this test scanned zero endpoints and passed.)
+    """
+    from fastapi.testclient import TestClient
+
+    from app.db.models.patient import Patient
+    from app.db.session import SessionLocal
+    from app.main import app
+    from scripts.seed_synthetic_data import seed_demo_fixtures
+
+    with TestClient(app) as client:
+        db = SessionLocal()
+        try:
+            seed_demo_fixtures(db)
+            names = {p.name for p in db.query(Patient).all() if p.name}
+            any_patient = db.query(Patient).first()
+            patient_id = any_patient.patient_id if any_patient else "none"
+        finally:
+            db.close()
+        assert names, "no patients seeded, so this test proves nothing"
+
+        admin = client.post(
+            "/api/v1/auth/login", json={"phone": "9999999903", "pin": "1234"}
+        ).json()
+        asha = client.post(
+            "/api/v1/auth/login", json={"phone": "9999999999", "pin": "1234"}
+        ).json()
+        headers = {"Authorization": f"Bearer {admin['access_token']}"}
+
+        # Put a real HIGH-risk case on the board first.
+        #
+        # Without this the escalation queue and the compliance view come
+        # back empty, every response is name-free, and the scan passes
+        # while proving nothing -- which is exactly what happened when
+        # this test was first written. A leak test needs something to
+        # leak.
+        import base64
+
+        asha_headers = {"Authorization": f"Bearer {asha['access_token']}"}
+        transcript = (
+            "Meera Patil, 28 saal, 7 mahine ki pregnancy. Aaj BP 160 over 110 tha. "
+            "Usne pichle 2 hafte se iron tablets nahi li."
+        )
+        visit = client.post(
+            "/api/v1/visits/voice",
+            headers=asha_headers,
+            json={
+                "worker_id": asha["worker_id"],
+                "patient_id": patient_id,
+                "audio_base64": base64.b64encode(transcript.encode()).decode(),
+                "language_code": "hi",
+            },
+        )
+        assert visit.status_code == 200, visit.text
+        assert visit.json()["risk_level"] == "HIGH", "expected a HIGH case to exist"
+
+        # And confirm a supervisor who *may* see names actually does, so
+        # the scan below is looking at populated responses.
+        anm = client.post(
+            "/api/v1/auth/login", json={"phone": "9999999901", "pin": "1234"}
+        ).json()
+        probe = client.get(
+            "/api/v1/escalations/pending",
+            headers={"Authorization": f"Bearer {anm['access_token']}"},
+        )
+        assert probe.status_code == 200 and any(
+            name in probe.text for name in names
+        ), "the escalation queue is empty, so this scan would prove nothing"
+
+        substitutions = {
+            "{worker_id}": asha["worker_id"],
+            "{patient_id}": patient_id,
+            "{month}": "6",
+            "{year}": "2026",
+        }
+
+        checked, leaked = [], []
+        for raw_path, methods in app.openapi()["paths"].items():
+            if "get" not in methods or not raw_path.startswith("/api/"):
+                continue
+            path = raw_path
+            for token, value in substitutions.items():
+                path = path.replace(token, value)
+            if "{" in path:
+                continue  # a path parameter with no sensible value here
+            resp = client.get(path, headers=headers)
+            checked.append(raw_path)
+            if resp.status_code != 200:
+                continue  # refused, which is the point
+            body = resp.text
+            if any(name in body for name in names):
+                leaked.append(raw_path)
+
+        # Guard against the failure mode this test already had once: a
+        # scan that silently covers nothing and reports success.
+        assert len(checked) >= 10, f"only scanned {len(checked)} endpoints: {checked}"
+        assert not leaked, f"an admin can read patient names from: {leaked}"
