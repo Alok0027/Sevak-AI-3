@@ -123,7 +123,7 @@ export default function FollowupCompliance({ compliance, showSubCentre }) {
                             className="is-clickable"
                             onClick={() => navigate(`/patients/${v.patient_id}`)}
                           >
-                            <td className={`rail-cell tone-${railTone(v.bucket)}`} />
+                            <td className={`rail-cell tone-${railTone(v.bucket, v.risk_level)}`} />
                             <td>
                               <span className="cell-stack">
                                 <span className="cell-strong">{v.patient_name}</span>
@@ -168,11 +168,24 @@ export default function FollowupCompliance({ compliance, showSubCentre }) {
   );
 }
 
-function railTone(bucket) {
-  if (bucket === "overdue") return "high";
-  if (bucket === "due_today") return "medium";
-  return "low";
+/// The colour bar takes the worse of her risk and her deadline.
+///
+/// It used to read only the deadline, so a woman classified HIGH whose
+/// follow-up was not due yet got a calm green bar next to the word HIGH
+/// in red -- the two strongest signals on the row disagreeing with each
+/// other. The bar is the thing a supervisor scans down a column of forty
+/// rows, and it has to mean "look here", whichever reason applies.
+function railTone(bucket, riskLevel) {
+  const RANK = { low: 0, medium: 1, high: 2 };
+  const fromRisk = riskLevel === "HIGH" ? "high"
+    : riskLevel === "MEDIUM" ? "medium"
+    : "low";
+  const fromDeadline = bucket === "overdue" ? "high"
+    : bucket === "due_today" ? "medium"
+    : "low";
+  return RANK[fromRisk] >= RANK[fromDeadline] ? fromRisk : fromDeadline;
 }
+
 
 function statusClass(bucket) {
   if (bucket === "overdue") return "risk-tag tone-high";
