@@ -162,6 +162,22 @@ async def run_voice_visit(
         except Exception:  # noqa: BLE001 -- see above
             logger.exception("immediate HIGH-risk alert failed after visit %s", visit.visit_id)
 
+    # Patient message, sent rather than drafted, when the deployment asks
+    # for it (settings.auto_send_patient_messages).
+    #
+    # Normally Agent 3's message waits as a draft: the ASHA opens it,
+    # reads the exact text, confirms the patient agreed to be contacted on
+    # that number, and only then does it go. That consent step is the
+    # right default and it stays the default.
+    #
+    # Switched on, the pipeline runs end to end without a human in it --
+    # a recorded visit produces a delivered message. Failures are recorded
+    # on the action, never raised: a patient's phone being unreachable
+    # must not fail the ASHA's visit, exactly as with the supervisor
+    # alert above.
+    if settings.auto_send_patient_messages and patient.phone:
+        await _send_patient_message(db, settings, visit, patient, whatsapp_client, sms_client)
+
     # FR-06.1: run the 48-hour escalation check here rather than only when a
     # supervisor opens the dashboard. A patient who has been HIGH and
     # untouched for two days should not depend on someone happening to look,
@@ -190,3 +206,59 @@ async def run_voice_visit(
         risk_drivers=risk_drivers,
         actions_generated=actions,
     )
+
+
+async def _send_patient_message(db, settings, visit, patient, whatsapp_client, sms_client) -> None:
+    """Deliver the message Agent 3 wrote for this patient, now.
+
+    WhatsApp goes as the approved template, for the reason the config
+    explains: a follow-up reminder is business-initiated, so Meta refuses
+    free-form text outside a 24-hour window (131047). The LLM's fuller
+    wording is still what is stored and shown in the app -- the template
+    is only what WhatsApp permits to be delivered.
+
+    SMS carries the full text, because nothing restricts its wording.
+    """
+    from app.services.notifications import preview
+    from app.services.sms_client import MockSmsClient
+    from app.services.whatsapp_client import MockWhatsAppClient
+
+    action = (
+        db.query(Action)
+        .filter(Action.visit_id == visit.visit_id, Action.type == "whatsapp")
+        .first()
+    )
+    if action is None:
+        return
+
+    for channel, client in (("whatsapp", whatsapp_client), ("sms", sms_client)):
+        if client is None:
+            continue
+        mocked = isinstance(client, (MockWhatsAppClient, MockSmsClient))
+        try:
+            payload, _ = preview(action, visit, patient, channel, settings)
+        except Exception:  # noqa: BLE001 -- no phone, unverified template
+            continue
+        try:
+            if payload.get("template"):
+                result = await client.send_template(
+                    payload["phone"], payload["template"], payload["params"], payload["language"]
+                )
+            else:
+                result = await client.send_message(payload["phone"], payload["text"])
+            action.status = "mock_sent" if mocked else "sent"
+            action.sent_at = datetime.now(timezone.utc)
+            db.commit()
+            audit_record(
+                db, user_id=visit.worker_id, action_type="patient.message.sent",
+                record_id=action.action_id, record_type="action",
+                details={"channel": channel, "auto": True,
+                         "provider_result": str(result.get("status", "accepted"))[:40]},
+            )
+            # One channel is enough. Two messages about one visit is noise
+            # to her and spend to the deployment.
+            return
+        except Exception as exc:  # noqa: BLE001 -- see docstring
+            logger.warning("auto-send over %s failed: %s", channel, exc)
+            action.status = "failed"
+            db.commit()

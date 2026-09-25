@@ -95,6 +95,21 @@ class Settings(BaseSettings):
     # Twilio's shared sandbox sender -- the same for every account.
     twilio_whatsapp_from: str = "whatsapp:+14155238886"
 
+    # Send the patient her message the moment the visit is recorded,
+    # instead of leaving it as a draft for the ASHA to approve.
+    #
+    # Off by default, and that default is the considered position: the
+    # approval step is where she confirms the patient agreed to receive
+    # health information on that number, and "the system texted her
+    # without asking" is not a thing to discover after the fact.
+    #
+    # On, the workflow runs end to end untouched -- a visit produces a
+    # delivered message -- which is what a demonstration of the whole
+    # pipeline needs, and what a deployment with consent captured
+    # elsewhere would want. Every send is still recorded on the action and
+    # in the audit log either way.
+    auto_send_patient_messages: bool = False
+
     # SMS provider: "mock" | "real" (Twilio). Independent of use_mocks and
     # WhatsApp -- a real delivery channel for the same message Agent 3
     # already drafts, for teams without WhatsApp Business API access yet
