@@ -34,8 +34,11 @@ class _LoginScreenState extends State<LoginScreen> {
     final phone = _phoneController.text.trim();
     final pin = _pinController.text.trim();
     if (!await OfflineCredential.verify(phone, pin)) return null;
-    final session = await Session.restore();
+    // restoreLocked, not restore: she is signing in *because* the session
+    // is locked, and restore() refuses a locked one by design.
+    final session = await Session.restoreLocked();
     if (session == null) return null;
+    await Session.save(session);  // unlocked again
     widget.api.setToken(session.token);
     if (!mounted) return null;
     ScaffoldMessenger.of(context).showSnackBar(

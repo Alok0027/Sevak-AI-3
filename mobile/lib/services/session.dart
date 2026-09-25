@@ -26,10 +26,11 @@ class Session {
   static const _secure = FlutterSecureStorage();
   static const _sessionKey = 'sevakai_session_v1';
 
-  static Future<void> save(Session session) async {
+  static Future<void> save(Session session, {bool locked = false}) async {
     await _secure.write(key: _sessionKey, value: jsonEncode({
       'token': session.token, 'workerId': session.workerId,
       'role': session.role, 'workerName': session.workerName,
+      'locked': locked,
     }));
     final prefs = await SharedPreferences.getInstance();
     for (final key in [_kToken, _kWorkerId, _kRole, _kWorkerName]) {
@@ -37,11 +38,15 @@ class Session {
     }
   }
 
-  /// Returns null if there is no saved session (or it's incomplete).
+  /// The session to open the app with, or null to show the sign-in screen.
+  ///
+  /// A locked session is not returned: signing out has to mean the next
+  /// person picking up the phone sees a PIN prompt, not her patient list.
   static Future<Session?> restore() async {
     final secured = await _secure.read(key: _sessionKey);
     if (secured != null) {
       final data = jsonDecode(secured) as Map<String, dynamic>;
+      if (data['locked'] == true) return null;
       return Session(token: data['token'], workerId: data['workerId'],
           role: data['role'], workerName: data['workerName']);
     }
@@ -56,6 +61,38 @@ class Session {
     final session = Session(token: token, workerId: workerId, role: role, workerName: workerName);
     await save(session); // Remove plaintext only after secure storage succeeds.
     return session;
+  }
+
+  /// Sign out without throwing away what lets her back in.
+  ///
+  /// Deleting the session outright is what broke offline sign-in: after
+  /// signing out at lunch there was nothing left on the phone to check a
+  /// PIN against, so an ASHA in a village with no signal could not open
+  /// her own patient list again until she found a bar.
+  ///
+  /// Locking keeps the token and the stored PIN hash, and marks the
+  /// session closed so `restore()` refuses it -- the next person to pick
+  /// up the phone gets the sign-in screen. Her PIN is the gate, exactly as
+  /// it is online. A phone being handed on for good wants `clear()`.
+  static Future<void> lock() async {
+    final secured = await _secure.read(key: _sessionKey);
+    if (secured == null) return;
+    final data = jsonDecode(secured) as Map<String, dynamic>;
+    data['locked'] = true;
+    await _secure.write(key: _sessionKey, value: jsonEncode(data));
+  }
+
+  /// The locked session, for the PIN check that is about to unlock it.
+  static Future<Session?> restoreLocked() async {
+    final secured = await _secure.read(key: _sessionKey);
+    if (secured == null) return null;
+    try {
+      final data = jsonDecode(secured) as Map<String, dynamic>;
+      return Session(token: data['token'], workerId: data['workerId'],
+          role: data['role'], workerName: data['workerName']);
+    } catch (_) {
+      return null;
+    }
   }
 
   static Future<void> clear() async {

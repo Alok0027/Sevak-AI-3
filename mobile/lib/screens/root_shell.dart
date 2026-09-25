@@ -207,15 +207,17 @@ class _RootShellState extends State<RootShell> {
     );
     if (confirmed != true) return;
     await _syncService.dispose();
-    await Session.clear();
-    // Her saved patient list goes too. The unsent queue deliberately does
-    // not (see OfflineQueue) -- work she recorded must survive a logout --
-    // but a cached ward is just a copy of something the server can send
-    // again, and it has no business staying on a handed-over handset.
+    // Locked, not erased. Erasing left nothing on the phone to check a
+    // PIN against, so signing out at lunch stranded her from her own
+    // patient list for the rest of a day with no signal. Locking shows
+    // the next person the sign-in screen and still lets her back in with
+    // her PIN, online or off -- which is what signing out means to her.
+    await Session.lock();
+    // Her saved patient list goes, though. The unsent queue deliberately
+    // does not (see OfflineQueue) -- work she recorded must survive a
+    // logout -- but a cached ward is just a copy of something the server
+    // can send again.
     await PatientCache.clear();
-    // The offline PIN goes with it. A signed-out phone must not still be
-    // able to unlock her session without the server.
-    await OfflineCredential.forget();
     widget.api.clearToken();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
