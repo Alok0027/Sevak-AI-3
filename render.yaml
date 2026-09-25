@@ -73,11 +73,17 @@ services:
       - key: WHATSAPP_PROVIDER
         value: meta             # the Meta Cloud API, not Twilio's sandbox
       - key: SMS_PROVIDER
-        value: mock             # "real" turns on the Twilio SMS fallback
-                                # (SRS section 11 risk register). Off here
-                                # because WhatsApp is the delivery channel;
-                                # the TWILIO_* keys below exist for when it
-                                # is wanted as a backup.
+        value: real             # Twilio, live.
+                                #
+                                # Note what this switches on beyond patient
+                                # messages: agent5's supervisor alert fires
+                                # inline on every HIGH-risk visit and sends
+                                # by SMS. Patient WhatsApp still waits for
+                                # the ASHA to approve each one, but these
+                                # go on their own. On a Twilio trial every
+                                # recipient must be a verified number, so
+                                # an alert to an unverified supervisor is
+                                # attempted and refused.
 
       - key: ENVIRONMENT
         value: production
@@ -164,7 +170,7 @@ services:
       - key: WHATSAPP_PROVIDER
         value: meta
       - key: SMS_PROVIDER
-        value: mock           # match the web service's setting, above
+        value: real           # match the web service's setting, above
       - key: WHATSAPP_API_TOKEN
         sync: false
       - key: WHATSAPP_PHONE_NUMBER_ID
